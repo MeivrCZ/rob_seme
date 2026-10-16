@@ -1,0 +1,189 @@
+"""Random placement of the task: turntable somewhere on the table, base plate with
+the puzzle somewhere on the turntable.
+
+Rules (assignment + team decisions):
+  - the turntable with the base and puzzle must not touch the robot (with adapter and
+    the hoop at its nominal mount) in q_home; MIN_CLEARANCE is kept for any
+    rotation of the turntable (checked against the volume swept by the spinning
+    task, a solid of revolution),
+  - the base may overhang the turntable, but must not tip over: the centre of mass
+    of base + puzzle + magnets has to project into the support region, which is the
+    intersection of the base footprint (125 x 125 mm square) and the turntable top
+    disc (both convex, so the intersection is convex), with STABILITY_MARGIN.
+
+All frames are in the ctu_crs robot base frame (m). Placeholders (not measured yet):
+TABLE_Z, CAGE_XY and the turntable dimensions in turntable.urdf.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import trimesh
+import yourdfpy
+from ctu_crs import CRS97
+
+HERE = Path(__file__).resolve().parent
+
+# PLACEHOLDER: table surface; assumed = the robot's mounting plane (bottom of the
+# RoboDK base, 24.8 mm below the ctu base frame).
+TABLE_Z = -0.0248
+# PLACEHOLDER: region of the table where the turntable centre may be (the cage).
+CAGE_XY = np.array([[-0.8, 0.8], [-0.8, 0.8]])
+MIN_CLEARANCE = 0.01  # m, to the robot in q_home
+STABILITY_MARGIN = 0.005  # m, centre of mass from the edge of the support region
+BASE_HALF = 0.0625  # m, half side of the base plate footprint
+# Mass model for the centre of mass: printed parts are PETG (1.27 g/cm^3) with
+# 3 perimeters + 10-20 % infill -> ASSUMED effective fill 0.5; magnets in base and
+# puzzle foot: 3 + 3 neodymium discs 10 x 3 mm (7.5 g/cm^3) under the groove.
+PRINT_DENSITY = 1270.0 * 0.5  # kg/m^3
+MAGNET_MASS = 7500.0 * np.pi * 0.005**2 * 0.003  # kg, one magnet
+MAGNETS_XY = np.array([[-0.015, 0.0], [0.0, -0.015], [0.015, 0.0]])  # base frame
+TASK_PUZZLE = "puzzle_D"
+# Nominal hoop pose in the adapter_front frame (see view_models.py).
+HOOP_MOUNT = np.eye(4)
+
+
+def load_urdf(path: Path) -> yourdfpy.URDF:
+    # Mesh paths in the URDFs are relative ("meshes/x.stl"), resolve them against
+    # the URDF's own directory.
+    return yourdfpy.URDF.load(path, mesh_dir=str(path.parent),
+                              build_collision_scene_graph=True,
+                              load_collision_meshes=True)
+
+
+def collision_meshes(urdf: yourdfpy.URDF, T_world: np.ndarray = np.eye(4)
+                     ) -> list[trimesh.Trimesh]:
+    """Collision meshes of @urdf in its current configuration, in world frame."""
+    scene = urdf.collision_scene
+    meshes = []
+    for node in scene.graph.nodes_geometry:
+        T, geom = scene.graph[node]
+        meshes.append(scene.geometry[geom].copy().apply_transform(T_world @ T))
+    return meshes
+
+
+def yaw_matrix(x: float, y: float, z: float, yaw: float) -> np.ndarray:
+    T = trimesh.transformations.rotation_matrix(yaw, [0, 0, 1])
+    T[:3, 3] = x, y, z
+    return T
+
+
+@dataclass
+class Placement:
+    turntable_xy: np.ndarray  # turntable centre on the table, robot base frame
+    base_xy: np.ndarray  # base centre relative to the turntable top centre
+    base_yaw: float  # rad, base rotation about the turntable axis
+
+    def turntable_T(self) -> np.ndarray:
+        """Pose of the turntable origin (bottom centre)."""
+        return yaw_matrix(*self.turntable_xy, TABLE_Z, 0.0)
+
+    def base_T_top(self) -> np.ndarray:
+        """Pose of the base in the turntable 'top' frame."""
+        return yaw_matrix(*self.base_xy, 0.0, self.base_yaw)
+
+
+class TaskScene:
+    """Static models of the task and the robot in q_home, for placement checks."""
+
+    def __init__(self) -> None:
+        self.turntable = load_urdf(HERE / "turntable.urdf")
+        self.base = load_urdf(HERE / "base.urdf")
+        self.puzzle = load_urdf(HERE / f"{TASK_PUZZLE}.urdf")
+        self.T_top = self.turntable.get_transform("top", self.turntable.base_link)
+        self.T_mount = self.base.get_transform("puzzle_mount", self.base.base_link)
+        cyl = self.turntable.link_map["turntable_link"].collisions[0].geometry.cylinder
+        self.turntable_radius = cyl.radius
+        self.com_xy = self._com_xy()
+
+        robot = load_urdf(HERE / "crs97.urdf")
+        robot.update_cfg(CRS97(tty_dev=None).q_home)
+        hoop = load_urdf(HERE / "hoop.urdf")
+        T_hoop = robot.get_transform("adapter_front", robot.base_link) @ HOOP_MOUNT
+        self.robot_home = trimesh.collision.CollisionManager()
+        for i, m in enumerate(collision_meshes(robot) + collision_meshes(hoop, T_hoop)):
+            self.robot_home.add_object(f"robot{i}", m)
+
+    def _com_xy(self) -> np.ndarray:
+        """Centre of mass of base + puzzle + magnets, xy in the base frame."""
+        parts = [(m, np.eye(4)) for m in collision_meshes(self.base)]
+        parts += [(m, self.T_mount) for m in collision_meshes(self.puzzle)]
+        masses, coms = [], []
+        for m, T in parts:
+            masses.append(PRINT_DENSITY * m.volume)
+            coms.append(trimesh.transform_points([m.center_mass], T)[0, :2])
+        masses += [2 * MAGNET_MASS] * len(MAGNETS_XY)  # base + puzzle magnet pairs
+        coms += list(MAGNETS_XY)
+        return np.average(coms, axis=0, weights=masses)
+
+    def stability_margin(self, p: Placement) -> float:
+        """Distance [m] of the centre of mass from the edge of the support region
+        (square footprint intersected with the top disc); negative = tips over."""
+        com_base = self.com_xy
+        com_top = trimesh.transform_points([[*com_base, 0.0]], p.base_T_top())[0, :2]
+        to_square = BASE_HALF - np.abs(com_base).max()
+        to_disc = self.turntable_radius - np.linalg.norm(com_top)
+        return min(to_square, to_disc)
+
+    def task_meshes(self, p: Placement) -> list[trimesh.Trimesh]:
+        """Collision meshes of turntable, base and puzzle in the world frame."""
+        T_tt = p.turntable_T()
+        T_base = T_tt @ self.T_top @ p.base_T_top()
+        return (collision_meshes(self.turntable, T_tt)
+                + collision_meshes(self.base, T_base)
+                + collision_meshes(self.puzzle, T_base @ self.T_mount))
+
+    def swept_task_mesh(self, p: Placement, dz: float = 0.002) -> trimesh.Trimesh:
+        """Volume swept by turntable + base + puzzle during a full turn, in the world
+        frame: solid of revolution of the max. radius from the turntable axis per
+        height slab @dz (sampled on the surfaces, padded by @dz)."""
+        T_tt = p.turntable_T()
+        local = [m.copy().apply_transform(np.linalg.inv(T_tt))
+                 for m in self.task_meshes(p)]
+        pts = np.vstack([np.vstack([m.vertices, m.sample(20000, seed=0)])
+                         for m in local])
+        r, z = np.linalg.norm(pts[:, :2], axis=1), pts[:, 2]
+        edges = np.arange(z.min(), z.max() + dz, dz)
+        slab = np.clip(np.digitize(z, edges) - 1, 0, len(edges) - 2)
+        r_max = np.zeros(len(edges) - 1)
+        np.maximum.at(r_max, slab, r)
+        # Pad, circumscribe the 64-gon of revolve() and round up to 0.1 mm (nearly
+        # equal radii of neighbouring slabs would otherwise produce sliver faces).
+        sections = 64
+        r_max = np.ceil((r_max + dz) / np.cos(np.pi / sections) / 1e-4) * 1e-4
+        profile = [[0.0, edges[0]]]
+        for i, rm in enumerate(r_max):  # staircase profile (r, z), steps only
+            if i == 0 or rm != r_max[i - 1]:
+                profile += [[rm, edges[i]]]
+            if i == len(r_max) - 1 or rm != r_max[i + 1]:
+                profile += [[rm, edges[i + 1]]]
+        profile.append([0.0, edges[-1]])
+        swept = trimesh.creation.revolve(np.array(profile), sections=sections)
+        if swept.volume < 0:
+            swept.invert()
+        return swept.apply_transform(T_tt)
+
+    def clearance_to_robot(self, p: Placement) -> float:
+        """Minimum distance [m] of the spinning task to the robot in q_home
+        (0 if touching)."""
+        task = trimesh.collision.CollisionManager()
+        task.add_object("swept", self.swept_task_mesh(p))
+        return max(0.0, self.robot_home.min_distance_other(task))
+
+    def random_placement(self, rng: np.random.Generator,
+                         max_tries: int = 1000) -> Placement:
+        """Uniformly random placement satisfying the rules in the module doc."""
+        # Base centre within the disc where any part of the base can still touch it.
+        reach = self.turntable_radius + BASE_HALF * np.sqrt(2)
+        for _ in range(max_tries):
+            r, phi = reach * np.sqrt(rng.uniform()), rng.uniform(0, 2 * np.pi)
+            p = Placement(rng.uniform(CAGE_XY[:, 0], CAGE_XY[:, 1]),
+                          r * np.array([np.cos(phi), np.sin(phi)]),
+                          rng.uniform(0, 2 * np.pi))
+            if (self.stability_margin(p) >= STABILITY_MARGIN
+                    and self.clearance_to_robot(p) >= MIN_CLEARANCE):
+                return p
+        raise RuntimeError(f"no valid placement found in {max_tries} tries")

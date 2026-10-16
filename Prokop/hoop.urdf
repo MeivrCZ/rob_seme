@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!-- hoop: standalone static model from Hoop.step.
+     Mesh in millimetres (scale 0.001). Link origin = STEP-file origin, unchanged.
+     Mass/inertia assume density 1.24 g/cm^3 -> 16.1 g (material not given in the STEP). -->
+<robot name="hoop">
+  <material name="hoop_white"><color rgba="0.95 0.95 0.95 1.0"/></material>
+  <material name="hoop_blue"><color rgba="0.12 0.22 0.60 1.0"/></material>
+  <link name="hoop_link">
+    <!-- dual-colour print: white 0.8 mm face layers, blue core (split by step2stl.py);
+         collision = whole hoop -->
+    <visual>
+      <geometry><mesh filename="meshes/hoop_white.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="hoop_white"/>
+    </visual>
+    <visual>
+      <geometry><mesh filename="meshes/hoop_blue.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="hoop_blue"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="meshes/hoop.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0.000000 -0.080649 -0.003300" rpy="0 0 0"/>
+      <mass value="0.01613"/>
+      <inertia ixx="5.1748e-05" ixy="6.1015e-11" ixz="-4.8407e-13" iyy="3.8541e-06" iyz="6.7025e-13" izz="5.5495e-05"/>
+    </inertial>
+  </link>
+
+  <!-- ring centre -->
+  <link name="hoop_center"/>
+  <joint name="hoop_link_to_hoop_center" type="fixed">
+    <parent link="hoop_link"/><child link="hoop_center"/>
+    <origin xyz="0.00000 -0.13491 0.00000" rpy="0 0 0"/>
+  </joint>
+</robot>

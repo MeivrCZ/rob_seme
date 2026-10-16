@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- Optional: include the hoop in a larger URDF at a chosen pose.
+     <xacro:include filename="hoop.xacro"/>
+     <xacro:hoop parent="tool0" xyz="0 0 0" rpy="0 0 0"/>   (any parent link, any pose) -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="hoop" params="parent xyz:='0 0 0' rpy:='0 0 0' prefix:=''">
+    <link name="${prefix}hoop_link">
+      <visual>
+        <geometry><mesh filename="meshes/hoop.stl" scale="0.001 0.001 0.001"/></geometry>
+      </visual>
+      <collision>
+        <geometry><mesh filename="meshes/hoop.stl" scale="0.001 0.001 0.001"/></geometry>
+      </collision>
+    </link>
+    <joint name="${prefix}hoop_mount" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}hoop_link"/>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+    </joint>
+    <link name="${prefix}hoop_center"/>
+    <joint name="${prefix}hoop_center_joint" type="fixed">
+      <parent link="${prefix}hoop_link"/>
+      <child link="${prefix}hoop_center"/>
+      <origin xyz="0 -0.135 0" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+</robot>

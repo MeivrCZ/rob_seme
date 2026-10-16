@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!-- base: standalone static model from base_01-02.step.
+     Mesh in millimetres (scale 0.001). Link origin = STEP-file origin, unchanged.
+     Mass/inertia assume density 1.24 g/cm^3 -> 94.8 g (material not given in the STEP). -->
+<robot name="base">
+  <material name="base_white"><color rgba="0.95 0.95 0.95 1.0"/></material>
+  <material name="base_black"><color rgba="0.03 0.03 0.03 1.0"/></material>
+  <link name="base_link">
+    <!-- white plate + black ArUco relief (split by step2stl.py); collision = whole base -->
+    <visual>
+      <geometry><mesh filename="meshes/base_plate.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="base_white"/>
+    </visual>
+    <visual>
+      <geometry><mesh filename="meshes/base_markers.stl" scale="0.001 0.001 0.001"/></geometry>
+      <material name="base_black"/>
+    </visual>
+    <collision>
+      <geometry><mesh filename="meshes/base.stl" scale="0.001 0.001 0.001"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="-0.000007 0.000181 0.002541" rpy="0 0 0"/>
+      <mass value="0.09475"/>
+      <inertia ixx="1.2716e-04" ixy="2.5796e-06" ixz="1.8244e-09" iyy="1.2692e-04" iyz="-1.3724e-08" izz="2.5366e-04"/>
+    </inertial>
+  </link>
+
+  <!-- put any puzzle_X link origin here: its triangular foot (z -2.5..0) drops into the groove, groove floor at z=2.5 -->
+  <link name="puzzle_mount"/>
+  <joint name="base_link_to_puzzle_mount" type="fixed">
+    <parent link="base_link"/><child link="puzzle_mount"/>
+    <origin xyz="0.00000 0.00000 0.00500" rpy="0 0 0"/>
+  </joint>
+
+  <!-- centre of the ArUco 4x4 marker (40x40 mm, black relief z 5.0..5.6), upper-left -->
+  <link name="guide_1"/>
+  <joint name="base_link_to_guide_1" type="fixed">
+    <parent link="base_link"/><child link="guide_1"/>
+    <origin xyz="-0.03750 0.03750 0.00500" rpy="0 0 0"/>
+  </joint>
+
+  <!-- centre of the ArUco 4x4 marker (40x40 mm, black relief z 5.0..5.6), lower-right -->
+  <link name="guide_2"/>
+  <joint name="base_link_to_guide_2" type="fixed">
+    <parent link="base_link"/><child link="guide_2"/>
+    <origin xyz="0.03750 -0.03750 0.00500" rpy="0 0 0"/>
+  </joint>
+</robot>

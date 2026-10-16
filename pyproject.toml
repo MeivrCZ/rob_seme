@@ -6,6 +6,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ctu-crs>=1.0.6",
+    "manifold3d>=3.5.4",
+    "python-fcl>=0.7.0.11",
+    "trimesh>=5.1.1",
+    "viser>=1.1.1",
+    "yourdfpy>=0.0.60",
 ]
 
 [project.scripts]
@@ -14,3 +19,8 @@ crs97 = "crs97:main"
 [build-system]
 requires = ["uv_build>=0.12.18,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+cad = [
+    "cadquery-ocp>=8.0.1.1.0",
+]
