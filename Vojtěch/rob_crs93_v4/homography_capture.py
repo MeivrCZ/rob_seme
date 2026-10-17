@@ -33,18 +33,9 @@ def _bgr_frame(img: np.ndarray) -> np.ndarray:
 
 
 def detect_single_circle(frame: np.ndarray) -> tuple[float, float] | None:
-    """Vrati stred kruhu jen pri jednoznacne detekci. Zadny nebo vice = None."""
-    img = _bgr_frame(frame)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (5, 5), 0)
-    circles = cv2.HoughCircles(
-        gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=50,
-        param1=100, param2=40, minRadius=6, maxRadius=150,
-    )
-    if circles is None or len(circles[0]) != 1:
-        return None
-    u, v, _ = circles[0, 0]
-    return float(u), float(v)
+    """Automaticky stred kruhoveho otvoru hoopu, jen pokud je jednoznacny."""
+    from hoop_detection import detect_hoop_circle
+    return detect_hoop_circle(frame).center
 
 
 def select_point(frame: np.ndarray, *, method: str = "click") -> tuple[float, float] | None:

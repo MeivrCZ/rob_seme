@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 
 from homography_capture import HomographySession, _bgr_frame, detect_single_circle
+from hoop_detection import detect_hoop_circle
 
 
 @dataclass
@@ -172,6 +173,45 @@ class HoopAutoScanner:
         self.plan = ScanPlan(points, segments, start_q, offset, table_z, nx, ny, step_limit)
         return self.plan
 
+    def test_detection(self):
+        """Capture and diagnose WITHOUT moving the robot; no plan required."""
+        self._require_real()
+        frame = _bgr_frame(self.camera.capture())
+        result = detect_hoop_circle(frame)
+        self.session.folder.mkdir(parents=True, exist_ok=True)
+        raw = self.session.folder / "hoop_test_raw.png"
+        overlay = self.session.folder / "hoop_test_debug.png"
+        cv2.imwrite(str(raw), frame)
+        cv2.imwrite(str(overlay), result.annotate(frame))
+        print(f"DETEKCE HOOPU: {'OK' if result.center else 'NEUSPESNA'} "
+              f"({result.reason}); metoda={result.method}; "
+              f"kandidatu={len(result.candidates)}")
+        if result.center:
+            print(f"Stred (u,v)=({result.center[0]:.1f}, {result.center[1]:.1f}), "
+                  f"r={result.radius_px:.1f}px")
+        print(f"Fotka: {raw}; diagnostika: {overlay}")
+        return result
+
+    def diagnose_saved_failure(self):
+        """Re-evaluate the last failed scan image WITHOUT hardware/motion."""
+        failures = sorted(self.session.folder.glob('auto_failed_*.png'))
+        if not failures:
+            raise FileNotFoundError(f"Nenalezen auto_failed_*.png v {self.session.folder}")
+        original = failures[-1]
+        frame = cv2.imread(str(original), cv2.IMREAD_COLOR)
+        if frame is None:
+            raise RuntimeError(f"Nelze precist {original}")
+        result = detect_hoop_circle(frame)
+        diagnostic = original.with_name(original.stem + '_debug.png')
+        cv2.imwrite(str(diagnostic), result.annotate(frame))
+        print(f"Posledni selhani: {original}; novy detektor: "
+              f"{'OK' if result.center else 'NEUSPESNY'} - {result.reason}; "
+              f"kandidatu={len(result.candidates)}")
+        if result.center:
+            print(f"Stred: u={result.center[0]:.1f}, v={result.center[1]:.1f}")
+        print(f"Diagnostika: {diagnostic}")
+        return result
+
     def run(self) -> int:
         """Run the preplanned sweep without a per-move or batch confirmation.
 
@@ -222,9 +262,16 @@ class HoopAutoScanner:
                     raise RuntimeError("Robot se behem fotografovani pohnul")
                 if uv is None:
                     self.session.folder.mkdir(parents=True, exist_ok=True)
-                    cv2.imwrite(str(self.session.folder / f"auto_failed_{collected+1:03d}.png"), frame)
-                    raise RuntimeError(f"Kruh se nenasel jednoznacne na bode {collected+1}; "
-                                       "kontrolni fotka auto_failed_XXX.png. Prujezd ZASTAVEN.")
+                    failed = self.session.folder / f"auto_failed_{collected+1:03d}.png"
+                    cv2.imwrite(str(failed), frame)
+                    detection = detect_hoop_circle(frame)
+                    overlay = failed.with_name(failed.stem + '_debug.png')
+                    cv2.imwrite(str(overlay), detection.annotate(frame))
+                    raise RuntimeError(
+                        f"Kruh se nenasel jednoznacne na bode {collected+1}: "
+                        f"{detection.reason}. Fotka: {failed}; "
+                        f"diagnostika: {overlay}. Prujezd ZASTAVEN."
+                    )
                 self.session.add(uv, tuple(xyz), (frame.shape[1], frame.shape[0]))
                 collected += 1
                 self.session.folder.mkdir(parents=True, exist_ok=True)

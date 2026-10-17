@@ -68,6 +68,8 @@ class HomographyExtension:
   homo offset X Y Z      presny offset stredu hoopu od flange TCP [m]
   homo scan plan XMIN XMAX YMIN YMAX TABLE_Z HEIGHT_CM [NX NY]
                          kontrola 5x5 bodu (bez pohybu), vse v BASE metrech
+  homo scan test         vyfoti hoop a otestuje detekci BEZ POHYBU
+  homo scan debug        vyhodnoti ulozeny auto_failed_*.png BEZ POHYBU
   homo scan run          automaticky prujezd + detekce + solve bez potvrzovani
   homo scan status       vypis planu
   homo solve             vypocet H, RANSAC, ulozeni do data/homography/homography.npz
@@ -144,6 +146,8 @@ prujezdem over fyzicky table Z, offset hoopu, prekazky a E-STOP.""")
   homo scan plan X0 X1 Y0 Y1 TABLE_Z HEIGHT_CM [NX NY]
                                   souradnice BASE CRS93 [m], HEIGHT nad stolem [cm]
   homo scan status                zobrazi plan; zadny pohyb
+  homo scan test                  otestuje detekci na aktualnim obrazu, bez pohybu
+  homo scan debug                 zpracuje posledni auto_failed_*.png, bez pohybu
   homo scan run                   automaticky pohyb a snimani a homo solve
 
 PLAN vyzaduje fyzicky zmerenou vysku stolu v CRS93 BASE a zmereny offset.
@@ -168,10 +172,16 @@ bezpecnostni funkce regulatoru/roboticke stanice.""")
                 print(f"Plan: {len(plan.points)} bodu, {len(plan.segments)} kloubovych mezikroku, "
                       f"table Z={plan.table_z:.4f} m; minimalni clearance=0.010 m")
             return
+        if argv == ["test"]:
+            self.scanner.test_detection()
+            return
+        if argv == ["debug"]:
+            self.scanner.diagnose_saved_failure()
+            return
         if argv == ["run"]:
             self.scanner.run()
             return
-        raise ValueError("homo scan help|plan X0 X1 Y0 Y1 TABLE_Z HEIGHT_CM [NX NY]|status|run")
+        raise ValueError("homo scan help|plan X0 X1 Y0 Y1 TABLE_Z HEIGHT_CM [NX NY]|status|test|debug|run")
 
     def _invalidate_calibration(self):
         """Any edit to ChArUco observations/anchors makes the saved H unusable."""
