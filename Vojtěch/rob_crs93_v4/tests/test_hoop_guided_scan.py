@@ -1,0 +1,78 @@
+"""Adaptive scan integration tests run ONLY on deterministic fake robot/camera."""
+import numpy as np
+import pytest
+from pathlib import Path
+from unittest.mock import patch
+
+from homography_capture import HomographySession
+from hoop_detection import HoopDetection
+from hoop_guided_scan import GuidedHoopScanner
+from test_hoop_auto_scan import FakeRobot, FakeCamera
+
+
+def create(tmp_path):
+    robot, cam = FakeRobot(), FakeCamera()
+    robot.q = np.array([.02, 0, .50, 0, 0, 0], float)
+    sess = HomographySession(folder=tmp_path)
+    sess.target_offset_tcp_m = (.135, 0., 0.)
+    robot.set_hoop_offset(sess.target_offset_tcp_m)
+    return robot, cam, sess, GuidedHoopScanner(robot, cam, sess)
+
+
+def detector(robot, *, visible=lambda x, y: True):
+    def mock(image):
+        T = robot.fk(robot.get_q())
+        xy = (T @ np.array([.135, 0., 0., 1.]))[:2]
+        u, v = 960 + 3400 * (xy[0] + .115), 600 + 3400 * xy[1]
+        if visible(*xy) and 100 < u < 1820 and 100 < v < 1100:
+            return HoopDetection((u, v), 70., 'synthetic', 'OK', ((u,v,70.),))
+        return HoopDetection(None,None,'synthetic','out of view',())
+    return mock
+
+
+def test_prepare_never_moves_and_rejects_wrong_height(tmp_path):
+    robot, _, _, scanner = create(tmp_path)
+    with patch('hoop_guided_scan.detect_hoop_circle', side_effect=detector(robot)):
+        plan = scanner.prepare(.4, 10, 3, 3)
+    assert plan.center_z == pytest.approx(.5)
+    assert robot.moves == []
+    with pytest.raises(RuntimeError, match='cilove vysce'):
+        scanner.prepare(.3, 10, 3, 3)
+    assert not robot.moves
+
+
+def test_adaptive_run_learns_jacobian_and_solves(tmp_path):
+    robot, cam, sess, scanner = create(tmp_path)
+    with patch('hoop_guided_scan.detect_hoop_circle', side_effect=detector(robot)):
+        scanner.prepare(.4, 10, 3, 3)
+        calib = scanner.run()
+    assert len(sess.samples) >= 8
+    assert len(robot.moves) > 10
+    assert calib.rms_px < .01
+    assert calib.inliers >= 8
+    assert scanner.setup is None
+    x, y = sess.pixel_to_world(960, 600)
+    assert x == pytest.approx(-.115, abs=.003)
+    assert y == pytest.approx(0, abs=.003)
+
+
+def test_lost_hoop_undoes_only_previous_small_step(tmp_path):
+    robot, cam, sess, scanner = create(tmp_path)
+    # Leave a narrow stripe of visibility. A step beyond its edge must rollback.
+    with patch('hoop_guided_scan.detect_hoop_circle', side_effect=detector(robot, visible=lambda x,y: x < -.110)):
+        scanner.prepare(.4, 10, 3, 3)
+        first = scanner._observe(sess.target_offset_tcp_m)
+        after = scanner._attempt(first, [0.008, 0])
+        assert after is None
+        np.testing.assert_allclose(robot.get_q(), first.q, atol=1e-9)
+        assert scanner.failed_moves == 1
+        assert len(robot.moves) == 2
+    assert (tmp_path/'guided_lost_raw.png').exists()
+
+
+def test_requires_visible_seed_and_no_motion(tmp_path):
+    robot, cam, sess, scanner = create(tmp_path)
+    with patch('hoop_guided_scan.detect_hoop_circle', return_value=HoopDetection(None,None,'fake','no ring',())):
+        with pytest.raises(RuntimeError, match='viditelny'):
+            scanner.prepare(.4,10,3,3)
+    assert robot.moves == []

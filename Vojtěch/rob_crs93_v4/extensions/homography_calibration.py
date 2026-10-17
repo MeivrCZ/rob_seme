@@ -9,6 +9,7 @@ import json
 import numpy as np
 
 from hoop_auto_scan import HoopAutoScanner
+from hoop_guided_scan import GuidedHoopScanner
 from homography_capture import HomographySession
 from charuco_homography import CharucoHomographySession
 
@@ -44,6 +45,7 @@ class HomographyExtension:
         self.session = HomographySession(folder=ctx.root / "data" / "homography")
         self.board = CharucoHomographySession(folder=ctx.root / "data" / "homography")
         self.scanner = HoopAutoScanner(ctx.robot, ctx.camera, self.session)
+        self.guided = GuidedHoopScanner(ctx.robot, ctx.camera, self.session)
         self.board.load()
         # Load samples for status and continuation, not robot/camera hardware.
         if (self.session.folder / "samples.json").is_file():
@@ -70,7 +72,10 @@ class HomographyExtension:
                          kontrola 5x5 bodu (bez pohybu), vse v BASE metrech
   homo scan test         vyfoti hoop a otestuje detekci BEZ POHYBU
   homo scan debug        vyhodnoti ulozeny auto_failed_*.png BEZ POHYBU
-  homo scan run          automaticky prujezd + detekce + solve bez potvrzovani
+  homo scan run          puvodni prujezd s BASE mrizkou
+  homo scan guided plan TABLE_Z HEIGHT_CM [NX NY]
+                         test viditelnosti, vysky a bezpecnosti BEZ POHYBU
+  homo scan guided run   adaptivni kalibrace podle obrazu, kontrolovane kroky
   homo scan status       vypis planu
   homo solve             vypocet H, RANSAC, ulozeni do data/homography/homography.npz
   homo map U V           prevede pixel na (X,Y) ve vysce kalibrace
@@ -148,7 +153,10 @@ prujezdem over fyzicky table Z, offset hoopu, prekazky a E-STOP.""")
   homo scan status                zobrazi plan; zadny pohyb
   homo scan test                  otestuje detekci na aktualnim obrazu, bez pohybu
   homo scan debug                 zpracuje posledni auto_failed_*.png, bez pohybu
-  homo scan run                   automaticky pohyb a snimani a homo solve
+  homo scan run                   puvodni scan s pevnou BASE mrizkou
+  homo scan guided plan TABLE_Z HEIGHT_CM [NX NY]
+                                  overi pocatecni viditelny vodorovny hoop, NEHYBE
+  homo scan guided run            snima posuny X/Y, koriguje pohyb podle obrazu
 
 PLAN vyzaduje fyzicky zmerenou vysku stolu v CRS93 BASE a zmereny offset.
 Nehybe robotem. RUN posila fyzicke prikazy BEZ interaktivniho potvrzeni,
@@ -156,6 +164,25 @@ a vyzaduje provozni dozor, volny prostor a pristupny E-STOP.
 Kontrola 1 cm je jen geometricka preflight kontrola a nenahrazuje
 bezpecnostni funkce regulatoru/roboticke stanice.""")
             return
+        if argv[0] == "guided":
+            if len(argv) in (4, 6) and argv[1] == "plan":
+                table_z, height_cm = map(float, argv[2:4])
+                nx, ny = (5, 5) if len(argv) == 4 else (int(argv[4]), int(argv[5]))
+                self.guided.prepare(table_z, height_cm, nx, ny)
+                return
+            if argv == ["guided", "run"]:
+                self.guided.run()
+                return
+            if argv == ["guided", "status"]:
+                setup = self.guided.setup
+                if setup is None:
+                    print("GUIDED: neni pripraven; homo scan guided plan TABLE_Z HEIGHT_CM [NX NY]")
+                else:
+                    print(f"GUIDED: obraz={setup.image_size}, start uv={setup.initial_uv}, "
+                          f"Z={setup.center_z:.4f} m, cilova mrizka={setup.nx}x{setup.ny}; "
+                          "neprovede zadny pohyb dokud nezadas guided run")
+                return
+            raise ValueError("homo scan guided plan TABLE_Z HEIGHT_CM [NX NY] | guided status | guided run")
         if argv[0] == "plan" and len(argv) in (7, 9):
             pars = [float(x) for x in argv[1:7]]
             nx, ny = (5, 5) if len(argv) == 7 else (int(argv[7]), int(argv[8]))
@@ -181,7 +208,7 @@ bezpecnostni funkce regulatoru/roboticke stanice.""")
         if argv == ["run"]:
             self.scanner.run()
             return
-        raise ValueError("homo scan help|plan X0 X1 Y0 Y1 TABLE_Z HEIGHT_CM [NX NY]|status|test|debug|run")
+        raise ValueError("homo scan help | guided plan TABLE_Z HEIGHT_CM [NX NY] | guided run | plan X0 X1 Y0 Y1 TABLE_Z HEIGHT_CM [NX NY] | status | test | debug | run")
 
     def _invalidate_calibration(self):
         """Any edit to ChArUco observations/anchors makes the saved H unusable."""
