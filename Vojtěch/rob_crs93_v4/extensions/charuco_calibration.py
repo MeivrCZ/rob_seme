@@ -72,6 +72,35 @@ def _read_gray(filepath: Path):
     return image, gray
 
 
+def _safe_charuco_points(corners, ids):
+    """Normalize OpenCV 4.x/5.x arrays; reject inconsistent detections.
+
+    A mismatched corner/ID array must never be handed to OpenCV drawing
+    or calibration. A few OpenCV builds have returned inconsistent pairs.
+    """
+    if corners is None or ids is None:
+        return None, None, "no ChArUco corners"
+    try:
+        raw_corners = np.asarray(corners)
+        raw_ids = np.asarray(ids)
+        if raw_corners.size % 2:
+            return None, None, f"odd corner coordinate count: {raw_corners.size}"
+        points = np.asarray(raw_corners, dtype=np.float32).reshape(-1, 1, 2)
+        corner_ids = np.asarray(raw_ids, dtype=np.int32).reshape(-1, 1)
+    except (ValueError, TypeError) as exc:
+        return None, None, f"invalid corner/ID arrays: {exc}"
+    if len(points) != len(corner_ids):
+        return None, None, (f"corner/ID mismatch: {len(points)} corner positions, "
+                             f"{len(corner_ids)} IDs")
+    if not len(points):
+        return None, None, "no ChArUco corners"
+    if not np.all(np.isfinite(points)):
+        return None, None, "non-finite corner coordinates"
+    if len(np.unique(corner_ids)) != len(corner_ids):
+        return None, None, "duplicate ChArUco corner IDs"
+    return np.ascontiguousarray(points), np.ascontiguousarray(corner_ids), None
+
+
 def detect_image(path: Path, square_mm: float = 20.0,
                  marker_mm: float = 15.0):
     """Return camera image and ChArUco observations; mm defaults ONLY for detection."""
@@ -151,7 +180,13 @@ This does not calibrate camera-to-robot transform (eye-to-hand).""")
         if not cv2.imwrite(str(dest), image):
             raise RuntimeError(f"Could not save image: {dest}")
         print(f"Saved frame: {dest}")
-        self.inspect(dest)
+        # A calibration preview must not kill the host or disconnect hardware.
+        # Even if detection fails, keep the original frame for later inspection.
+        try:
+            self.inspect(dest)
+        except Exception as exc:
+            print(f"[ChArUco warning] Snapshot saved, preview failed: "
+                  f"{type(exc).__name__}: {exc}")
         return dest
 
     def import_images(self, path: Path) -> None:
@@ -183,19 +218,32 @@ This does not calibrate camera-to-robot transform (eye-to-hand).""")
         (image, gray, _, cc, ci, mc, mi, n_markers, n_corners) = detect_image(path)
         preview = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         if mi is not None and len(mi):
-            cv2.aruco.drawDetectedMarkers(preview, mc, mi)
-        if ci is not None and len(ci):
-            cv2.aruco.drawDetectedCornersCharuco(preview, cc, ci, (0, 255, 0))
-        label = f"Markers {n_markers}/70  Corners {n_corners}/117"
+            try:
+                cv2.aruco.drawDetectedMarkers(preview, mc, mi)
+            except cv2.error as exc:
+                print(f"[ChArUco warning] Cannot draw markers: {exc}")
+        points, ids, error = _safe_charuco_points(cc, ci)
+        if error and n_corners:
+            print(f"[ChArUco warning] {error}; invalid corners not drawn.")
+        if points is not None:
+            # Draw manually: OpenCV 5.0 can reject otherwise valid arrays in
+            # drawDetectedCornersCharuco with an assertion. This also avoids
+            # a preview error becoming a control-app shutdown.
+            for xy in points.reshape(-1, 2):
+                x, y = (int(round(float(v))) for v in xy)
+                cv2.circle(preview, (x, y), 3, (0, 255, 0), -1)
+        label = f"Markers {n_markers}/70  Corners {len(points) if points is not None else 0}/117"
         cv2.rectangle(preview, (8, 8), (565, 54), (30, 30, 30), -1)
         cv2.putText(preview, label, (20, 39), cv2.FONT_HERSHEY_SIMPLEX,
                     0.86, (255, 255, 255), 2, cv2.LINE_AA)
         output = self.overlay_dir / f"{path.stem}_detected.png"
         if not cv2.imwrite(str(output), preview):
             raise RuntimeError(f"Failed to write overlay: {output}")
-        self.last_details = {"path": str(path), "markers": n_markers, "corners": n_corners}
-        print(f"{path.name}: {n_markers}/70 markers, {n_corners}/117 corners. Overlay: {output}")
-        if n_corners < MIN_CORNERS:
+        valid_count = len(points) if points is not None else 0
+        self.last_details = {"path": str(path), "markers": n_markers, "corners": valid_count,
+                             "detection_warning": error if n_corners else None}
+        print(f"{path.name}: {n_markers}/70 markers, {valid_count}/117 valid corners. Overlay: {output}")
+        if valid_count < MIN_CORNERS:
             print("Not enough detectable ChArUco corners; move/tilt board and improve lighting.")
         return output
 
@@ -221,6 +269,9 @@ This does not calibrate camera-to-robot transform (eye-to-hand).""")
                 print(f"[skip] different resolution: {path.name}")
                 continue
             cc, ci, _, _ = detector.detectBoard(gray)
+            cc, ci, warning = _safe_charuco_points(cc, ci)
+            if warning and ci is None:
+                print(f"[skip] {path.name}: {warning}")
             count = 0 if ci is None else len(ci)
             if count < MIN_CORNERS:
                 print(f"[skip] only {count} corners: {path.name}")
