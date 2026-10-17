@@ -1,8 +1,10 @@
 """Image-guided, one-height hoop homography calibration for CRS93.
 
-A *visible, stationary seed* is mandatory. This class never searches blindly in
-robot space. All movement commands pass through RobotManager's table/URDF,
-joint-limit and path checks. Visual feedback is NOT collision protection.
+If the hoop is not yet visible, preflight a known, previously photographed
+station-specific seed pose. Execution makes a fully checked move to that pose,
+verifies the hoop, and only then starts camera-feedback corrections. The robot
+NEVER sweeps blindly to hunt for a lost hoop. Visual feedback is NOT collision
+protection.
 """
 from __future__ import annotations
 
@@ -16,6 +18,12 @@ from hoop_detection import detect_hoop_circle
 
 
 FLANGE_ROTATION = np.diag([-1., 1., -1.])
+# First point of the previous real CRS93 scan: full hoop was detected at
+# approximately (u,v)=(248,820). These numbers are STATION-SPECIFIC and are
+# merely a photographed acquisition pose, NOT the image-to-robot homography.
+# Once this seed is acquired the controller learns its actual image Jacobian.
+VISIBLE_SEED_XY_M = (0.280, -0.170)
+STAGING_MAX_JOINT_STEP_RAD = float(np.deg2rad(2.0))
 
 
 @dataclass(frozen=True)
@@ -24,11 +32,12 @@ class GuidedSetup:
     center_z: float
     offset: tuple[float, float, float]
     initial_q: np.ndarray
-    image_size: tuple[int, int]
-    initial_uv: tuple[float, float]
-    initial_radius: float
+    image_size: tuple[int, int] | None
+    initial_uv: tuple[float, float] | None
+    initial_radius: float | None
     nx: int
     ny: int
+    seed_q: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -86,8 +95,61 @@ class GuidedHoopScanner:
         return _Observation(q.copy(), xyz, np.array(found.center, float),
                             float(found.radius_px), (frame.shape[1], frame.shape[0]), frame)
 
+    def _make_seed(self, start_q, offset, center_z):
+        """Plan a VERIFIED joint-space route to a previously photographed pose.
+
+        No motion here. Check the direct path and all intermediate poses with
+        exactly the same model/limits that actual RobotManager.move_to_q uses.
+        If that path is not possible, STOP instead of searching blindly.
+        """
+        center = np.array([*VISIBLE_SEED_XY_M, center_z], float)
+        pose = np.eye(4)
+        pose[:3, :3] = FLANGE_ROTATION
+        pose[:3, 3] = center - FLANGE_ROTATION @ np.asarray(offset, float)
+        _, limits_deg = self.robot.get_joint_limits_deg()
+        if limits_deg is None:
+            raise RuntimeError('Nelze naplanovat pocatecni polohu: chybi kloubove limity')
+        limits = np.deg2rad(np.asarray(limits_deg, float))
+        candidates = []
+        solutions = self.robot.ik(pose)
+        for solution in ([] if solutions is None else solutions):
+            q = np.asarray(solution, float).reshape(-1)
+            if q.shape != (6,) or not np.isfinite(q).all():
+                continue
+            if np.any(q < limits[:, 0]) or np.any(q > limits[:, 1]):
+                continue
+            xyz, rot = self._center(q, offset)
+            if (np.linalg.norm(xyz - center) > .004 or
+                    np.linalg.norm(rot - FLANGE_ROTATION) > .08):
+                continue
+            candidates.append(q)
+        if not candidates:
+            raise RuntimeError('IK: ani drive overena vychozi poloha hoopu '
+                               'X=0.280 Y=-0.170 neni dosazitelna v teto vysce. '
+                               'Robot se nepohnul.')
+        errors = []
+        for q_seed in sorted(candidates, key=lambda q: np.linalg.norm(q-start_q)):
+            try:
+                # Full start-to-seed motion must be cleared, including meshes.
+                self.robot.preview_move(q_seed)
+                # Check explicit staging increments also; no waypoint is
+                # dispatched until the WHOLE direct route was approved.
+                n = max(1, int(np.ceil(np.max(np.abs(q_seed - start_q)) /
+                                       STAGING_MAX_JOINT_STEP_RAD)))
+                waypoints = []
+                for k in range(1, n + 1):
+                    q = start_q + (q_seed-start_q) * (k/n)
+                    self.robot.check_table_clearance(q)
+                    waypoints.append(q.copy())
+                return q_seed.copy(), tuple(waypoints)
+            except (RuntimeError, ValueError) as exc:
+                errors.append(str(exc))
+        raise RuntimeError('Cesta z aktualni polohy do zorneho pole '
+                           'nesplnuje IK/limity/odstup od stolu. '
+                           'Robot se nepohnul. ' + '; '.join(errors[:2]))
+
     def prepare(self, table_z: float, height_cm: float, nx: int = 5, ny: int = 5):
-        """No movement. Requires seed hoop already visible, horizontal and at height."""
+        """NO MOTION: plan either from a visible hoop OR guarded acquisition."""
         self.setup = None
         self._ready()
         if not all(np.isfinite(v) for v in [table_z, height_cm]):
@@ -103,27 +165,70 @@ class GuidedHoopScanner:
             raise ValueError('Chybi potvrzeny offset hoopu v robot manageru')
         self.robot.set_table_z(table_z)
         self.robot.set_hoop_offset(offset)
-        q = np.asarray(self.robot.get_q(), float)
-        self.robot.check_table_clearance(q)
-        xyz, rot = self._center(q, offset)
-        target_z = table_z + height_cm / 100.
-        if abs(xyz[2] - target_z) > .007:
-            raise RuntimeError(f'Stred hoopu neni v cilove vysce: Z={xyz[2]:.4f}; pozadovano {target_z:.4f}. '
-                               'Nejdrive bezpecne nastav vysku a viditelny hoop.')
-        if np.linalg.norm(rot - FLANGE_ROTATION) > .12:
-            raise RuntimeError('Hoop neni vodorovne dle modelu. Nejdrǐve nastav spravnou orientaci.')
-        image = self._observe(offset)
-        if image is None:
-            raise RuntimeError('Hoop musi byt pred startem CELÝ a jednoznacne viditelny; '
-                               'robot se sam neposune naslepo.')
-        self.setup = GuidedSetup(float(table_z), target_z, offset, q.copy(), image.image_size,
-                                 tuple(map(float, image.uv)), image.radius, nx, ny)
+        q_start = np.asarray(self.robot.get_q(), float)
+        self.robot.check_table_clearance(q_start)
+        xyz, rot = self._center(q_start, offset)
+        target_z = float(table_z + height_cm / 100.)
+        image = None
+        if (abs(xyz[2] - target_z) <= .007 and
+                np.linalg.norm(rot - FLANGE_ROTATION) <= .12):
+            image = self._observe(offset)
+            if image is not None and not self._inside(image):
+                image = None
+        if image is not None:
+            q_seed = q_start.copy()
+            initial_uv = tuple(map(float, image.uv))
+            initial_radius = image.radius
+            print(f'GUIDED PLAN: hoop uz viditelny v uv={initial_uv}; Z={xyz[2]:.4f}m. '
+                  'Zadny uvodni presun nebude nutny.')
+        else:
+            # NEVER move from an unknown state directly as part of plan.
+            # Stage to the photographed station seed only if preflight passes.
+            q_seed, _ = self._make_seed(q_start, offset, target_z)
+            initial_uv, initial_radius = None, None
+            print(f'GUIDED PLAN: start Z={xyz[2]:.4f}m, cil stred hoopu '
+                  f'XYZ=({VISIBLE_SEED_XY_M[0]:.3f}, {VISIBLE_SEED_XY_M[1]:.3f}, '
+                  f'{target_z:.4f})m. Cesta IK/limity/1cm proverena, BEZ POHYBU.')
+            print('GUIDED RUN nejdrive automaticky dojede na viditelnou pozici, '
+                  'overi kruh a nasledne pouzije korekce obrazu.')
+        self.setup = GuidedSetup(float(table_z), target_z, offset, q_start.copy(),
+                                 image.image_size if image is not None else None,
+                                 initial_uv, initial_radius, nx, ny, q_seed.copy())
         self.jacobian = None
         self.total_steps = 0
         self.failed_moves = 0
-        print(f'GUIDED READY: hoop uv={tuple(image.uv.round(1))}, r={image.radius:.1f}px, '
-              f'Z={xyz[2]:.4f}m. Bez pohybu. Pristi prikaz: homo scan guided run')
         return self.setup
+
+    def _stage_to_seed(self, setup):
+        """Move to the preflighted acquisition pose. Never search in XY blind."""
+        current = np.asarray(self.robot.get_q(), float)
+        if np.max(np.abs(current - setup.initial_q)) > np.deg2rad(.25):
+            raise RuntimeError('Robot se od pripravy vychozi polohy pohnul')
+        # All checks are repeated immediately before sending any motion.
+        goal, segments = self._make_seed(current, setup.offset, setup.center_z)
+        if np.max(np.abs(goal - setup.seed_q)) > np.deg2rad(.1):
+            raise RuntimeError('IK se od pripravy zmenila; zkus znovu guided plan')
+        print(f'GUIDED START: automaticky presun na vychozi polohu '
+              f'({len(segments)} mezikroku), s kontrolou IK/1cm/feedbacku.')
+        for i, q in enumerate(segments, 1):
+            start, target = self.robot.preview_move(q)
+            self.robot.move_to_q(target, expected_q=start)
+            self.total_steps += 1
+            reached = np.asarray(self.robot.get_q(), float)
+            if np.max(np.abs(reached - target)) > np.deg2rad(.5):
+                raise RuntimeError('Nenavazala skutecna poloha: presun ZASTAVEN')
+            if i % 20 == 0 or i == len(segments):
+                print(f'GUIDED: uvodni presun {i}/{len(segments)}')
+        obs = self._observe(setup.offset, save_failure=True)
+        if obs is None or not self._inside(obs):
+            raise RuntimeError('Na predem overene vychozi poloze neni cely hoop videt. '
+                               'Dalsi automaticke pohyby ZASTAVENY. '
+                               'Viz guided_lost_raw.png / guided_lost_debug.png.')
+        if abs(obs.xyz[2] - setup.center_z) > .004:
+            raise RuntimeError('Po automatickem presunu nesedi vyska hoopu')
+        print(f'GUIDED ACQUIRED: kruh uv={obs.uv.round(1).tolist()}, '
+              f'r={obs.radius:.1f}px, Z={obs.xyz[2]:.4f}m')
+        return obs
 
     @staticmethod
     def _inside(obs: _Observation, extra_px=12):
@@ -283,11 +388,16 @@ class GuidedHoopScanner:
             raise RuntimeError('Robot se od guided plan pohnul; vytvor novy plan')
         if self.session.samples or tuple(self.session.target_offset_tcp_m) != setup.offset:
             raise RuntimeError('Data nebo offset se od planovani zmenily')
-        obs = self._observe(setup.offset)
-        if obs is None or not self._inside(obs):
-            raise RuntimeError('Hoop neni na zacatku cele videt: zadny pohyb')
-        if np.linalg.norm(obs.uv - np.asarray(setup.initial_uv)) > 28:
-            raise RuntimeError('Kamera/hoop se od planovani posunuly')
+        if setup.initial_uv is None:
+            # Prepare did NOT touch hardware; now acquire a previously observed
+            # safe station pose. If detection fails there, STOP immediately.
+            obs = self._stage_to_seed(setup)
+        else:
+            obs = self._observe(setup.offset)
+            if obs is None or not self._inside(obs):
+                raise RuntimeError('Hoop od pripravy zmizel: zadny pohyb')
+            if np.linalg.norm(obs.uv - np.asarray(setup.initial_uv)) > 28:
+                raise RuntimeError('Kamera/hoop se od planovani posunuly')
         print('GUIDED RUN: bez predem zadane BASE mrizky; male XY kroky, korekce podle kamery.')
         print('POZOR: operator musi sledovat robota s dostupnym fyzickym E-STOP.')
         self._store(obs)

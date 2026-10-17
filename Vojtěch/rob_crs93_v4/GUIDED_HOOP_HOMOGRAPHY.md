@@ -6,7 +6,7 @@ Tento režim nahrazuje pevnou XY mřížku **mřížkou v pixelech**. Robot nepo
 
 - Stůl má fyzicky ověřenou výšku `TABLE_Z` v soustavě CRS93 BASE. Číslo `-0.0248` z Prokopa je **odhad**, nikoliv bezpečně změřená výška.
 - Skutečný hoop je namontován podle modelu a jeho fyzický offset vůči přírubě je ověřen. Nominální předpoklad: `0.13491 0 0.010` m.
-- Robot je před `guided plan` **už v požadované výšce** (výška skutečného středu hoopu, nikoli příruby), s vodorovným hoopem, a celý prstenec je vidět v kameře. Režim ho z neznámé polohy NEHLEDÁ naslepo.
+- Robot **nemusí být před `guided plan` ve správné výšce ani v záběru**. V režimu `guided run` si sám naplánovaným kloubovým pohybem najede do známého, dříve skutečně vyfoceného místa `X=0.280, Y=-0.170 m`, se středem hoopu `Z=TABLE_Z+HEIGHT_CM/100`. Tam nejprve ověří, že je celý prstenec v obrazu. Pokud není, **zastaví bez hledání naslepo**. Tato výchozí XY poloha platí pro současnou stanici s nezměněnou kamerou; pokud se kamera nebo hoop přemístily, nestačí ji automaticky předpokládat.
 - Jedna výška/rovina => homografie platí pouze pro body této výšky. Známe-li výšku detekovaných bodů objektu, můžeme zvolit stejnou kalibrační rovinu.
 - Real-world překážky a kabely nemusejí být zahrnuté v geometrii. Vizualizace a softwarový model nejsou bezpečnostní ochrana; člověk sleduje průjezd u fyzického E-STOPu.
 
@@ -18,7 +18,7 @@ load all
 camera open
 homo clear
 homo offset 0.13491 0 0.010
-homo scan test
+# 'homo scan test' z HOME neni potreba: hoop tam muze byt mimo obraz
 homo scan guided plan -0.0248 10 5 5
 homo scan guided status
 homo scan guided run
@@ -26,9 +26,9 @@ homo status
 homo map 960 600
 ```
 
-`-0.0248` je na řádku jen jako **ilustrační hodnota** z modelu, která se musí nahradit skutečným měřením; bez něj skutečný sken nespouštěj. `guided plan` vůbec nepohne robotem: ověří 10cm výšku hoopu, orientaci, modelový odstup celé geometrie od stolu a přítomnost detekovatelného kruhu. Pokud zůstává hoop z minulého neúspěšného pokusu uříznutý na kraji, nejdříve ho bezpečně přesuň do polohy, ve které je celý viditelný.
+`-0.0248` je na řádku jen jako **ilustrační hodnota** z modelu, která se musí nahradit skutečným měřením; bez něj skutečný sken nespouštěj. `guided plan` vůbec nepohne robotem: z aktuálního stavu přes IK připraví trasu do výšky 10 cm nad stolem (pro **střed hoopu**) a do dříve detekované výchozí XY polohy. Zkontroluje modelové kloubové meze a všechny mezikroky proti minimálnímu odstupu 1 cm. Pokud cesta není dosažitelná, nepohne se a oznámí chybu. Pokud je hoop už celý vidět v požadované výšce a orientaci, přesun se vynechá.
 
-`guided run` pořídí dvě nezávislé malé pohybové sondy pro odhad pixelového Jacobianu, postupně najíždí směrem do středu kamery a dál do mřížky 5×5 bodů. Každý povolený pohyb je maximálně 12 mm v XY a prochází fyzicky stejnými kontrolami jako ostatní robotické příkazy. Po každém pohybu znovu detekuje střed a opraví Jacobian (průběžná korekce). Pokud kruh zmizí nebo se stane nespolehlivým, robot se vrací **na bezprostředně předchozí ověřenou kloubovou polohu**, zkontroluje opětovnou viditelnost a zmenší krok; pokud se návrat nepovede, sken okamžitě ukončí.
+`guided run` nejdřív provede naplánovaný přesun z aktuální polohy. Po přemístění pořídí nový snímek. Pokud se kruh nepodaří plně detekovat, další pohyb se neprovede a uloží se `guided_lost_raw.png` + `guided_lost_debug.png`. Teprve pak pořídí dvě nezávislé malé pohybové sondy pro odhad pixelového Jacobianu, postupně najíždí směrem do středu kamery a dál do mřížky 5×5 bodů. Každý povolený pohyb je maximálně 12 mm v XY a prochází fyzicky stejnými kontrolami jako ostatní robotické příkazy. Po každém pohybu znovu detekuje střed a opraví Jacobian (průběžná korekce). Pokud kruh zmizí nebo se stane nespolehlivým, robot se vrací **na bezprostředně předchozí ověřenou kloubovou polohu**, zkontroluje opětovnou viditelnost a zmenší krok; pokud se návrat nepovede, sken okamžitě ukončí.
 
 Neproveditelná IK, úhly mimo kloubové limity nebo porušení odstupu od stolu se nikdy nepřekračují; příslušný cíl sken přeskočí. Na závěr se při dostatku bodů a prostorovém pokrytí spočítá `homography.npz`; při nedostatečném pokrytí zůstávají snímky a korespondence dostupné pro diagnostiku, bez platné homografie.
 

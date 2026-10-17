@@ -30,14 +30,16 @@ def detector(robot, *, visible=lambda x, y: True):
     return mock
 
 
-def test_prepare_never_moves_and_rejects_wrong_height(tmp_path):
+def test_prepare_never_moves_and_plans_reposition_from_wrong_height(tmp_path):
     robot, _, _, scanner = create(tmp_path)
     with patch('hoop_guided_scan.detect_hoop_circle', side_effect=detector(robot)):
         plan = scanner.prepare(.4, 10, 3, 3)
     assert plan.center_z == pytest.approx(.5)
     assert robot.moves == []
-    with pytest.raises(RuntimeError, match='cilove vysce'):
-        scanner.prepare(.3, 10, 3, 3)
+    other_plan = scanner.prepare(.3, 10, 3, 3)
+    assert other_plan.initial_uv is None
+    assert other_plan.seed_q.shape == (6,)
+    assert other_plan.center_z == pytest.approx(.4)
     assert not robot.moves
 
 
@@ -70,9 +72,52 @@ def test_lost_hoop_undoes_only_previous_small_step(tmp_path):
     assert (tmp_path/'guided_lost_raw.png').exists()
 
 
-def test_requires_visible_seed_and_no_motion(tmp_path):
+def test_invisible_hoop_prepares_but_does_not_move_until_run(tmp_path):
     robot, cam, sess, scanner = create(tmp_path)
     with patch('hoop_guided_scan.detect_hoop_circle', return_value=HoopDetection(None,None,'fake','no ring',())):
-        with pytest.raises(RuntimeError, match='viditelny'):
+        setup = scanner.prepare(.4,10,3,3)
+    assert setup.initial_uv is None
+    assert robot.moves == []
+    with patch('hoop_guided_scan.detect_hoop_circle', return_value=HoopDetection(None,None,'fake','no ring',())):
+        with pytest.raises(RuntimeError, match='ZASTAVENY'):
+            scanner.run()
+    assert robot.moves  # acquisition is permitted only after run
+    assert sess.samples == []
+    assert scanner.setup is None
+    np.testing.assert_allclose(robot.get_q(), setup.seed_q) == []
+
+
+def test_from_home_autonomously_acquires_seed_before_feedback(tmp_path):
+    robot, cam, sess, scanner = create(tmp_path)
+    # Artificial high home: target ring Z=0.5, initial Z~0.9.
+    robot.q = np.array([0.415, -0.17, .91, 0, 0, 0], float)
+    def camera_simulator(image):
+        xyz = (robot.fk(robot.get_q()) @ np.array([.135, 0., 0., 1.]))[:3]
+        # At home the ring is not visible. Once lowered to the known starting
+        # position, the camera shows a ring; displacement maps to 2D pixels.
+        if abs(xyz[2] - .5) > .006:
+            return HoopDetection(None,None,'synthetic','high above camera',())
+        u = 320 + 3000 * (xyz[1] + .17)
+        v = 820 + 3000 * (xyz[0] - .28)
+        if not (85 < u < 1835 and 85 < v < 1115):
+            return HoopDetection(None,None,'synthetic','out of frame',())
+        return HoopDetection((u,v),70.,'synthetic','OK',((u,v,70.),))
+    with patch('hoop_guided_scan.detect_hoop_circle', side_effect=camera_simulator):
+        setup = scanner.prepare(.4, 10, 3, 3)
+        assert setup.initial_uv is None
+        assert not robot.moves
+        assert setup.seed_q[2] == pytest.approx(.5, abs=.03)
+        calibration = scanner.run()
+    assert len(robot.moves) > 15
+    assert len(sess.samples) >= 8
+    assert calibration.rms_px < .01
+    assert scanner.setup is None
+
+
+def test_no_seed_ik_prevents_all_motion(tmp_path):
+    robot, cam, sess, scanner = create(tmp_path)
+    robot.q = np.array([0.415, -0.17, .91, 0, 0, 0], float)
+    with patch.object(robot, 'ik', return_value=[]):
+        with pytest.raises(RuntimeError, match='IK'):
             scanner.prepare(.4,10,3,3)
     assert robot.moves == []

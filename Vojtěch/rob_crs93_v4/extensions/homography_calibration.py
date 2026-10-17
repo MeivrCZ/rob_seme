@@ -74,7 +74,7 @@ class HomographyExtension:
   homo scan debug        vyhodnoti ulozeny auto_failed_*.png BEZ POHYBU
   homo scan run          puvodni prujezd s BASE mrizkou
   homo scan guided plan TABLE_Z HEIGHT_CM [NX NY]
-                         test viditelnosti, vysky a bezpecnosti BEZ POHYBU
+                         naplanuje i samostatny presun z HOME na 10 cm, BEZ POHYBU
   homo scan guided run   adaptivni kalibrace podle obrazu, kontrolovane kroky
   homo scan status       vypis planu
   homo solve             vypocet H, RANSAC, ulozeni do data/homography/homography.npz
@@ -155,8 +155,9 @@ prujezdem over fyzicky table Z, offset hoopu, prekazky a E-STOP.""")
   homo scan debug                 zpracuje posledni auto_failed_*.png, bez pohybu
   homo scan run                   puvodni scan s pevnou BASE mrizkou
   homo scan guided plan TABLE_Z HEIGHT_CM [NX NY]
-                                  overi pocatecni viditelny vodorovny hoop, NEHYBE
-  homo scan guided run            snima posuny X/Y, koriguje pohyb podle obrazu
+                                  sam planuje najetí z HOME do drive vyfocene polohy, NEHYBE
+  homo scan guided run            sam nastavi vysku i viditelnou polohu,
+                                  pak meri posuny X/Y a koriguje podle obrazu
 
 PLAN vyzaduje fyzicky zmerenou vysku stolu v CRS93 BASE a zmereny offset.
 Nehybe robotem. RUN posila fyzicke prikazy BEZ interaktivniho potvrzeni,
@@ -178,9 +179,11 @@ bezpecnostni funkce regulatoru/roboticke stanice.""")
                 if setup is None:
                     print("GUIDED: neni pripraven; homo scan guided plan TABLE_Z HEIGHT_CM [NX NY]")
                 else:
-                    print(f"GUIDED: obraz={setup.image_size}, start uv={setup.initial_uv}, "
+                    acquisition = ("automaticke najeti na drive overeny bod"
+                                   if setup.initial_uv is None else "hoop uz viditelny")
+                    print(f"GUIDED: {acquisition}, start uv={setup.initial_uv}, "
                           f"Z={setup.center_z:.4f} m, cilova mrizka={setup.nx}x{setup.ny}; "
-                          "neprovede zadny pohyb dokud nezadas guided run")
+                          "zadny pohyb az do guided run")
                 return
             raise ValueError("homo scan guided plan TABLE_Z HEIGHT_CM [NX NY] | guided status | guided run")
         if argv[0] == "plan" and len(argv) in (7, 9):
