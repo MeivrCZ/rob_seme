@@ -15,10 +15,22 @@ class RobotManager:
         self.mode: str | None = None  # None, "real", "virtual"
         self._virtual_q: np.ndarray | None = None
         self._virtual_q_home: np.ndarray | None = None
+        self._released = False  # REAL only: release requested; feedback may be off
+        self._release_confirmed = False
 
     @property
     def connected(self) -> bool:
         return self._robot is not None
+
+    @property
+    def released(self) -> bool:
+        """True once REAL release was requested; remains locked until reconnect."""
+        return self._released
+
+    @property
+    def release_confirmed(self) -> bool:
+        """Whether the release API returned without error (hardware remains unverified)."""
+        return self._release_confirmed
 
     def connect(self, *, home: bool) -> None:
         """Connect to the real robot ONLY. Homing may physically move the robot."""
@@ -33,6 +45,8 @@ class RobotManager:
             raise
         self._robot = robot
         self.mode = "real"
+        self._released = False
+        self._release_confirmed = False
 
     def connect_virtual(self) -> None:
         """Use authentic offline CRS93 FK/IK without touching /dev/mars."""
@@ -47,6 +61,8 @@ class RobotManager:
         self._virtual_q_home = q_home.copy()
         self._robot = robot
         self.mode = "virtual"
+        self._released = False
+        self._release_confirmed = False
 
     def require(self):
         if self._robot is None:
@@ -55,6 +71,8 @@ class RobotManager:
 
     def get_q(self) -> np.ndarray:
         robot = self.require()
+        if self._released:
+            raise RuntimeError("Robot released: joint feedback is disconnected; pose is not reliable.")
         if self.mode == "virtual":
             return self._virtual_q.copy()
         return np.asarray(robot.get_q(), dtype=float).copy()
@@ -81,8 +99,31 @@ class RobotManager:
         if self.mode == "virtual":
             self._virtual_q = self._virtual_q_home.copy()
         else:
+            if self._released:
+                raise RuntimeError("Robot released: do not move until the station has been re-enabled and the connection reinitialized.")
             robot.soft_home()
             robot.wait_for_motion_stop()
+
+    def release(self) -> None:
+        """Engage brakes and disconnect feedback on a stopped REAL CRS93.
+
+        Caller must obtain explicit operator confirmation before calling.
+        This is NOT an E-STOP, a homing routine or power-off.
+        """
+        if self.mode != "real":
+            raise RuntimeError("robot release is available only with a connected REAL robot.")
+        if self._released:
+            raise RuntimeError("Robot has already been released.")
+        robot = self.require()
+        self.assert_stationary()  # fail closed if in_motion() is unavailable
+        release_command = getattr(robot, "release", None)
+        if not callable(release_command):
+            raise RuntimeError("The installed ctu_crs version does not provide robot.release().")
+        # If the command fails mid-flight, the physical state is unknown.
+        # Lock out subsequent motion on this connection even on exception.
+        self._released = True
+        release_command()
+        self._release_confirmed = True
 
     def assert_stationary(self) -> None:
         """Refuse a runtime mode switch while real arm is moving.
@@ -92,6 +133,10 @@ class RobotManager:
         if self.mode != "real":
             return
         robot = self.require()
+        if self._released:
+            # Feedback was disconnected when brakes engaged. Do not query motion
+            # from an interface that can no longer provide reliable feedback.
+            return
         check = getattr(robot, "in_motion", None)
         if not callable(check):
             raise RuntimeError("Cannot check robot motion; refusing mode switch.")
@@ -109,3 +154,5 @@ class RobotManager:
                 self._virtual_q = None
                 self._virtual_q_home = None
                 self.mode = None
+                self._released = False
+                self._release_confirmed = False

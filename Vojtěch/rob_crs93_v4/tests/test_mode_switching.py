@@ -24,6 +24,7 @@ class FakeRobot:
     events = []
     moving = False
     fail_initialize = False
+    fail_release = False
 
     def __init__(self, tty_dev=None):
         self.tty_dev = tty_dev
@@ -38,6 +39,17 @@ class FakeRobot:
 
     def in_motion(self):
         return self.moving
+
+    def release(self):
+        self.events.append(("release",))
+        if self.fail_release:
+            raise RuntimeError("Fake release failed")
+
+    def soft_home(self):
+        self.events.append(("soft_home",))
+
+    def wait_for_motion_stop(self):
+        self.events.append(("wait",))
 
     def get_q(self):
         return self._q.copy()
@@ -78,6 +90,7 @@ class SwitchingTests(unittest.TestCase):
         FakeRobot.events = []
         FakeRobot.moving = False
         FakeRobot.fail_initialize = False
+        FakeRobot.fail_release = False
         FakeCamera.events = []
         FakeCamera.fail_open = False
         self.tmp = tempfile.TemporaryDirectory()
@@ -178,6 +191,64 @@ class SwitchingTests(unittest.TestCase):
         with patch("builtins.input", return_value="wrong"), redirect_stdout(io.StringIO()):
             dispatch(self.ctx, self.ext, self.modes, ["mode", "real", "home"])
         self.assertFalse(any(e[0] == "initialize" for e in FakeRobot.events))
+
+    def test_release_real_waits_confirmation_and_blocks_moves(self):
+        self.modes.switch_real(home=False)
+        with patch("builtins.input", return_value="RELEASE"), redirect_stdout(io.StringIO()):
+            dispatch(self.ctx, self.ext, self.modes, ["robot", "release"])
+        self.assertEqual(FakeRobot.events.count(("release",)), 1)
+        self.assertTrue(self.ctx.robot.released)
+        self.assertIn("release requested", self.modes.describe())
+        with self.assertRaisesRegex(RuntimeError, "feedback"):
+            self.ctx.robot.get_q()
+        with self.assertRaisesRegex(RuntimeError, "released"):
+            self.ctx.robot.soft_home()
+        with self.assertRaisesRegex(RuntimeError, "released"):
+            self.modes.switch_real(home=False)
+        with redirect_stdout(io.StringIO()) as output:
+            dispatch(self.ctx, self.ext, self.modes, ["robot", "status"])
+        self.assertIn("not reliable", output.getvalue())
+        self.modes.disconnect()
+        self.assertFalse(self.ctx.robot.released)
+
+    def test_release_cancelled_does_not_call_hardware(self):
+        self.modes.switch_real(home=False)
+        with patch("builtins.input", return_value="NO"), redirect_stdout(io.StringIO()):
+            dispatch(self.ctx, self.ext, self.modes, ["robot", "release"])
+        self.assertNotIn(("release",), FakeRobot.events)
+        self.assertFalse(self.ctx.robot.released)
+
+    def test_release_refused_while_moving(self):
+        self.modes.switch_real(home=False)
+        FakeRobot.moving = True
+        with patch("builtins.input", side_effect=AssertionError("Should not prompt")):
+            with self.assertRaisesRegex(RuntimeError, "moving"):
+                dispatch(self.ctx, self.ext, self.modes, ["robot", "release"])
+        self.assertNotIn(("release",), FakeRobot.events)
+        FakeRobot.moving = False
+
+    def test_release_refused_without_real(self):
+        with self.assertRaisesRegex(RuntimeError, "REAL"):
+            self.ctx.robot.release()
+        with patch("builtins.input", side_effect=AssertionError("Should not prompt")):
+            with self.assertRaisesRegex(RuntimeError, "REAL"):
+                dispatch(self.ctx, self.ext, self.modes, ["robot", "release"])
+        self.modes.switch_virtual()
+        with self.assertRaisesRegex(RuntimeError, "REAL"):
+            self.ctx.robot.release()
+
+    def test_release_error_preserves_motion_lock(self):
+        self.modes.switch_real(home=False)
+        FakeRobot.fail_release = True
+        with self.assertRaisesRegex(RuntimeError, "Fake release failed"):
+            self.ctx.robot.release()
+        # Communication could have been lost *after* the controller received release.
+        # Fail closed: do not allow a subsequent motion on the same connection.
+        self.assertTrue(self.ctx.robot.released)
+        self.assertFalse(self.ctx.robot.release_confirmed)
+        self.assertIn("UNKNOWN", self.modes.describe())
+        with self.assertRaisesRegex(RuntimeError, "released"):
+            self.ctx.robot.soft_home()
 
     def test_switch_cli_commands(self):
         with redirect_stdout(io.StringIO()):

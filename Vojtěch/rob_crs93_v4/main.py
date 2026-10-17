@@ -50,6 +50,7 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   robot connect nohome     initialize without homing (only when reference valid)
   robot status             read joint positions and flange pose
   robot soft-home          reset virtual joints OR physical move (REAL ROBOT MOVES)
+  robot release            REAL only: engage brakes + disconnect feedback (confirmation)
   robot disconnect         close robot connection, does not move robot
   camera open|close        acquire/release Basler camera
   camera replay DIR        use a directory of recorded images (no hardware)
@@ -94,7 +95,7 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
                     if confirmation != "REFERENCE":
                         print("Cancelled.")
                         return True
-            if ctx.robot.mode == "real":
+            if ctx.robot.mode == "real" and not ctx.robot.released:
                 print("Already connected to real CRS93. No new homing will run.")
             modes.switch_real(home=args[2] == "home")
             print(modes.describe())
@@ -134,17 +135,40 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
                 print("Robot connected without homing (reference validity is your responsibility).")
             else:
                 print("Cancelled.")
+        elif args[1:] == ["release"]:
+            if ctx.robot.mode != "real":
+                raise RuntimeError("robot release requires a connected REAL CRS93. VIRTUAL mode is unaffected.")
+            if ctx.robot.released:
+                raise RuntimeError("Robot has already been released.")
+            # First check motion while feedback is still active; fail closed.
+            ctx.robot.assert_stationary()
+            print("WARNING: This engages brakes and disconnects feedback; the arm may DROP slightly.")
+            print("Use only with stopped robot, enough clearance, and in accordance with station procedure.")
+            print("After release, built-in motion commands are blocked until a new connection.")
+            ans = input("Robot stopped, safe clearance, authorized? Type RELEASE: ")
+            if ans == "RELEASE":
+                # Check again immediately before the command.
+                ctx.robot.release()
+                print("robot.release() completed: brakes engaged, feedback disconnected.")
+            else:
+                print("Cancelled. No release command sent.")
         elif args[1:] == ["disconnect"]:
             ctx.robot.assert_stationary()
             ctx.robot.close()
             print("Robot disconnected.")
         elif args[1:] == ["status"]:
+            if ctx.robot.released:
+                print("mode: real; release requested (feedback may be disconnected).")
+                print("Joint positions / flange pose are not reliable. Re-enable station and reconnect before reading.")
+                return True
             q = ctx.robot.get_q()
             import numpy as np
             print("mode:", ctx.robot.mode)
             print("q [rad]:", np.array2string(q, precision=4))
             print("T_base_flange:\n", ctx.robot.flange_pose())
         elif args[1:] == ["soft-home"]:
+            if ctx.robot.released:
+                raise RuntimeError("Robot released: restore arm power and reinitialize the connection before motion.")
             if ctx.robot.mode == "virtual":
                 ctx.robot.soft_home()
                 print("Virtual state reset to q_home. No physical motion.")
@@ -156,7 +180,7 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
                 else:
                     print("Cancelled.")
         else:
-            print("Try: robot connect virtual|home|nohome, robot virtual-set deg|rad Q0..Q5, robot status|soft-home|disconnect")
+            print("Try: robot connect virtual|home|nohome, robot virtual-set deg|rad Q0..Q5, robot status|soft-home|release|disconnect")
     elif command == "camera":
         if args[1:] == ["open"]:
             if ctx.robot.mode == "virtual":

@@ -30,6 +30,7 @@ class ModeManager:
     def describe(self) -> str:
         return (f"mode: {self.mode}\n"
                 f"robot: {self.ctx.robot.mode or 'disconnected'}\n"
+                f"robot feedback: {'release attempted - state UNKNOWN' if self.ctx.robot.released and not self.ctx.robot.release_confirmed else 'release requested (API completed)' if self.ctx.robot.released else 'not released by this app'}\n"
                 f"camera: {self.ctx.camera.mode or 'closed'}\n"
                 f"replay directory: {self.ctx.camera.replay_directory or '(none)'}\n"
                 f"calibrations stored: {len(self.ctx.calibration.names())}")
@@ -93,6 +94,8 @@ class ModeManager:
         runs an additional homing. On failure, attempts to restore VIRTUAL.
         """
         if self.ctx.robot.mode == "real":
+            if self.ctx.robot.released:
+                raise RuntimeError("Robot was released: close/reinitialize after restoring the station; cannot re-arm via mode real while connected.")
             if self.ctx.camera.mode == "replay":
                 self.ctx.camera.close()
             self.ctx.camera.open()
