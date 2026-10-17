@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import numpy as np
 
+from hoop_auto_scan import HoopAutoScanner
 from homography_capture import HomographySession
 from charuco_homography import CharucoHomographySession
 
@@ -42,12 +43,15 @@ class HomographyExtension:
         self.ctx = ctx
         self.session = HomographySession(folder=ctx.root / "data" / "homography")
         self.board = CharucoHomographySession(folder=ctx.root / "data" / "homography")
+        self.scanner = HoopAutoScanner(ctx.robot, ctx.camera, self.session)
         self.board.load()
         # Load samples for status and continuation, not robot/camera hardware.
         if (self.session.folder / "samples.json").is_file():
             saved = json.loads((self.session.folder / "samples.json").read_text(encoding="utf-8"))
             self.session.target_offset_tcp_m = tuple(saved["target_offset_tcp_m"])
             self.session.load_samples()
+        if 0.05 < np.linalg.norm(self.session.target_offset_tcp_m) < 0.25:
+            self.ctx.robot.set_hoop_offset(self.session.target_offset_tcp_m)
 
     def run(self, argv: list[str]) -> None:
         if not argv or argv == ["help"]:
@@ -61,7 +65,11 @@ class HomographyExtension:
   homo board clear             novy snimek a nove reference
   homo capture           vyber stred terce kliknutim (ENTER potvrdi, ESC zrusi)
   homo auto              pokus o kruh (ENTER potvrdi, klik opravi, ESC zrusi)
-  homo offset X Y Z      nastav presny posun stredu terce v TCP [m] PRED snimanim
+  homo offset X Y Z      presny offset stredu hoopu od flange TCP [m]
+  homo scan plan XMIN XMAX YMIN YMAX TABLE_Z HEIGHT_CM [NX NY]
+                         kontrola 5x5 bodu (bez pohybu), vse v BASE metrech
+  homo scan run          automaticky prujezd + detekce + solve bez potvrzovani
+  homo scan status       vypis planu
   homo solve             vypocet H, RANSAC, ulozeni do data/homography/homography.npz
   homo map U V           prevede pixel na (X,Y) ve vysce kalibrace
   homo status            vypise pocet bodu, offset, chybu a ulozeni
@@ -72,10 +80,14 @@ a NEHYBEJ s ni mezi capture a teach! Pro prevod do robot XYZ jsou potreba
 alespon 3 nekolinearni rohy, ktere presne zmeris/ukazes TCP nebo zadas.
 Rohy i fyzicke referencni body musi byt ve stejne rovine Z. Puvodni
 homo capture/auto alternativa pouziva terc na TCP, 8-20 pozic.
-Zadne prikazy homo nehybou robotem.""")
+POZOR: homo scan run HYBE REAL ROBOTEM; dodrz 1 cm minimalni vzdalenost
+celeho ramene a hoopu od stolu, kterou overuje geometricky model. Pred
+prujezdem over fyzicky table Z, offset hoopu, prekazky a E-STOP.""")
             return
         cmd = argv[0].lower()
-        if cmd == "board":
+        if cmd == "scan":
+            self._scan_command(argv[1:])
+        elif cmd == "board":
             self._board_command(argv[1:])
         elif cmd in ("capture", "auto") and len(argv) == 1:
             # Do not silently generate physically false results from replay + virtual FK.
@@ -90,6 +102,11 @@ Zadne prikazy homo nehybou robotem.""")
             offset = np.array([float(x) for x in argv[1:]], dtype=float)
             if not np.isfinite(offset).all():
                 raise ValueError("Offset musi obsahovat konecna cisla")
+            if hasattr(self.ctx.robot, 'set_hoop_offset'):
+                if .05 < np.linalg.norm(offset) < .25:
+                    self.ctx.robot.set_hoop_offset(offset)
+                elif hasattr(self.ctx.robot, 'clear_hoop_offset'):
+                    self.ctx.robot.clear_hoop_offset()
             self.session.target_offset_tcp_m = tuple(float(x) for x in offset)
             self.session.is_dirty = True
             self.session.homography = None
@@ -118,6 +135,43 @@ Zadne prikazy homo nehybou robotem.""")
         else:
             raise ValueError("Try: homo help | board ... | capture | auto | offset X Y Z | solve | map U V | status | load | undo | clear")
 
+
+    def _scan_command(self, argv: list[str]):
+        if not argv or argv == ["help"]:
+            print("""Hoop auto kalibrace (REAL robot+REAL kamera), bez potvrzovani pohybu:
+  homo offset X Y Z               zmereny offset stredu hoopu v TCP [m]
+  homo clear                      smaz stare body pred novou kalibraci
+  homo scan plan X0 X1 Y0 Y1 TABLE_Z HEIGHT_CM [NX NY]
+                                  souradnice BASE CRS93 [m], HEIGHT nad stolem [cm]
+  homo scan status                zobrazi plan; zadny pohyb
+  homo scan run                   automaticky pohyb a snimani a homo solve
+
+PLAN vyzaduje fyzicky zmerenou vysku stolu v CRS93 BASE a zmereny offset.
+Nehybe robotem. RUN posila fyzicke prikazy BEZ interaktivniho potvrzeni,
+a vyzaduje provozni dozor, volny prostor a pristupny E-STOP.
+Kontrola 1 cm je jen geometricka preflight kontrola a nenahrazuje
+bezpecnostni funkce regulatoru/roboticke stanice.""")
+            return
+        if argv[0] == "plan" and len(argv) in (7, 9):
+            pars = [float(x) for x in argv[1:7]]
+            nx, ny = (5, 5) if len(argv) == 7 else (int(argv[7]), int(argv[8]))
+            plan = self.scanner.make_plan(*pars, nx=nx, ny=ny,
+                                          offset_verified=self.ctx.robot._hoop_offset_tcp is not None)
+            print(f"Plan: {len(plan.points)} bodu, {len(plan.segments)} kontrolovanych kloubovych mezikroku; "
+                  f"hoop Z={plan.points[0].center_xyz[2]:.4f} m")
+            return
+        if argv == ["status"]:
+            plan = self.scanner.plan
+            if plan is None:
+                print("Plan neexistuje; homo scan plan ...")
+            else:
+                print(f"Plan: {len(plan.points)} bodu, {len(plan.segments)} kloubovych mezikroku, "
+                      f"table Z={plan.table_z:.4f} m; minimalni clearance=0.010 m")
+            return
+        if argv == ["run"]:
+            self.scanner.run()
+            return
+        raise ValueError("homo scan help|plan X0 X1 Y0 Y1 TABLE_Z HEIGHT_CM [NX NY]|status|run")
 
     def _invalidate_calibration(self):
         """Any edit to ChArUco observations/anchors makes the saved H unusable."""

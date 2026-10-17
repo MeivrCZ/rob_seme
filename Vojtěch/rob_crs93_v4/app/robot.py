@@ -8,6 +8,8 @@ from __future__ import annotations
 import numpy as np
 from threading import RLock
 from functools import wraps
+from pathlib import Path
+from app.plane_guard import TableClearanceGuard
 
 
 def _with_robot_lock(method):
@@ -29,8 +31,10 @@ class RobotManager:
         self._io_lock = RLock()
         if not isinstance(real_motion_enabled, bool):
             raise ValueError("real_motion_enabled must be true/false")
-        if not np.isfinite(max_step_deg) or not 0 < max_step_deg <= 10:
-            raise ValueError("max_step_deg must be in (0, 10] degrees")
+        # Legacy max_step_deg config is accepted for compatibility, but it no
+        # longer limits individual requested movements.
+        if not np.isfinite(max_step_deg) or max_step_deg <= 0:
+            raise ValueError("max_step_deg must be positive and finite")
         self.real_motion_enabled = real_motion_enabled
         self.max_step_rad = float(np.deg2rad(max_step_deg))
         if not np.isfinite(limit_margin_deg) or not 0 <= limit_margin_deg <= 10:
@@ -53,6 +57,38 @@ class RobotManager:
         self._released = False  # REAL only: release requested; feedback may be off
         self._release_confirmed = False
         self._motion_uncertain = False
+        # Table clearance must be explicitly configured for every station/run.
+        # Geometric checks fail closed for unspecified tabletop or hoop mounting.
+        self._table_guard = None
+        self._hoop_offset_tcp = None
+
+    def set_table_z(self, table_z_m: float) -> None:
+        """Declare measured horizontal tabletop Z in the CRS93 base frame."""
+        self._table_guard = TableClearanceGuard(
+            Path(__file__).resolve().parents[3] / 'Prokop', float(table_z_m))
+
+    def set_hoop_offset(self, offset_tcp) -> None:
+        """Set measured flange->hoop center XYZ in flange coordinates [m]."""
+        v = np.asarray(offset_tcp, float).reshape(-1)
+        if v.shape != (3,) or not np.isfinite(v).all() or not .05 < np.linalg.norm(v) < .25:
+            raise ValueError('Measure hoop centre offset in TCP before REAL motion')
+        self._hoop_offset_tcp = tuple(map(float, v))
+
+    def clear_hoop_offset(self) -> None:
+        self._hoop_offset_tcp = None
+
+    def check_table_clearance(self, q) -> np.ndarray:
+        if self._table_guard is None or self._hoop_offset_tcp is None:
+            raise RuntimeError('Before REAL movement set robot table Z and homo offset X Y Z (both in metres)')
+        return self._table_guard.check(q, self.require().fk, self._hoop_offset_tcp)
+
+    def _check_swept_clearance(self, a, b) -> None:
+        # The 2-degree steps here are GEOMETRIC PATH SAMPLING, not an upper
+        # limit on requested joint motion. No user step-size cap remains.
+        delta = np.asarray(b) - np.asarray(a)
+        count = max(1, int(np.ceil(np.max(np.abs(delta)) / np.deg2rad(2.0))))
+        for i in range(count+1):
+            self.check_table_clearance(np.asarray(a)+delta*(i/count))
 
     def _read_driver_limits(self, robot) -> None:
         """Get q_min/q_max from *this* ctu_crs instance; fail closed if invalid.
@@ -197,8 +233,9 @@ class RobotManager:
             raise RuntimeError("Current joints outside effective joint limits; refusing motion")
         if np.any(target < lo) or np.any(target > hi):
             raise ValueError("Requested target outside effective joint limits")
-        if np.max(np.abs(target - current)) > self.max_step_rad + 1e-10:
-            raise ValueError(f"Requested real move exceeds configured {np.rad2deg(self.max_step_rad):g} deg per joint; split into small moves")
+        # Keep mandatory mechanical joint limits; remove application-level 3°
+        # move cap. Check tabletop clearance over sampled joint-space motion.
+        self._check_swept_clearance(current, target)
 
     @_with_robot_lock
     def preview_move(self, joints: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -218,8 +255,8 @@ class RobotManager:
     def move_to_q(self, joints: np.ndarray, *, expected_q: np.ndarray | None = None) -> None:
         """Move virtual state or send ONE guarded real joint-space command.
 
-        Caller must obtain a new explicit human confirmation in real mode.
-        No implicit homing. No interpolation or collision checking in our app.
+        No interactive confirmation. No implicit homing. The model-based
+        tabletop guard checks a sampled joint-space path before dispatch.
         """
         robot = self.require()
         target = self._joint_vector(joints, label="Target")
@@ -261,8 +298,18 @@ class RobotManager:
         else:
             if self._released:
                 raise RuntimeError("Robot released: do not move until the station has been re-enabled and the connection reinitialized.")
+            self.assert_stationary()
+            if self._motion_uncertain:
+                raise RuntimeError("Prior motion outcome uncertain")
+            current = self._joint_vector(self.get_q(), label="Current joints")
+            target = self._joint_vector(robot.q_home, label="Home joints")
+            self._validate_motion(current, target)
+            self._motion_uncertain = True
             robot.soft_home()
             robot.wait_for_motion_stop()
+            if robot.in_motion():
+                raise RuntimeError("Robot reports motion after soft_home")
+            self._motion_uncertain = False
 
     @_with_robot_lock
     def release(self) -> None:

@@ -62,6 +62,10 @@ class MotionTests(unittest.TestCase):
 
     def mk(self, **options):
         robot = RobotManager('/dev/mock', **options)
+        # Mock-only workspace guard; actual URDF/clearance tests are separate.
+        robot._table_guard = types.SimpleNamespace(table_z_m=0.)
+        robot._hoop_offset_tcp = (.135, 0., 0.)
+        robot.check_table_clearance = lambda q: np.array([.5, .5, .5])
         self.addCleanup(robot.close)
         return robot
 
@@ -124,12 +128,11 @@ class MotionTests(unittest.TestCase):
         bot.connect_virtual()
         self.run_cli(bot, ['robot', 'limits'])
 
-    def test_small_relative_joint_motion_requires_human_confirm(self):
+    def test_small_relative_joint_motion_has_no_confirmation(self):
         bot = self.mk(real_motion_enabled=True, joint_limits_deg=self.limits, max_step_deg=3)
         bot.connect(home=False)
-        self.run_cli(bot, ['robot', 'jog', 'q0', '2'], 'CANCEL')
-        self.assertEqual(len(bot.require().moves), 0)
-        self.run_cli(bot, ['robot', 'jog', 'q0', '2'], 'MOVE')
+        with patch('builtins.input', side_effect=AssertionError('Must not ask MOVE')):
+            self.run_cli(bot, ['robot', 'jog', 'q0', '2'])
         self.assertEqual(len(bot.require().moves), 1)
         self.assertAlmostEqual(np.rad2deg(bot.get_q()[0]), 2)
 
@@ -145,8 +148,8 @@ class MotionTests(unittest.TestCase):
     def test_real_limits_step_moving_and_release_guard(self):
         bot = self.mk(real_motion_enabled=True, joint_limits_deg=self.limits, max_step_deg=3)
         bot.connect(home=False)
-        with self.assertRaisesRegex(ValueError, 'exceeds'):
-            bot.preview_move(np.deg2rad([4, 0, 0, 0, 0, 0]))
+        # No application-imposed 3-degree maximum anymore.
+        bot.preview_move(np.deg2rad([4, 0, 0, 0, 0, 0]))
         bot.require().q[0] = np.deg2rad(85)
         with self.assertRaisesRegex(ValueError, 'outside'):
             bot.preview_move(np.deg2rad([91, 0, 0, 0, 0, 0]))
@@ -170,7 +173,7 @@ class MotionTests(unittest.TestCase):
 
     def test_invalid_config_and_values(self):
         with self.assertRaises(ValueError): self.mk(real_motion_enabled=True, joint_limits_deg=[[0, 10]])
-        with self.assertRaises(ValueError): self.mk(max_step_deg=999)
+        self.mk(max_step_deg=999)  # old arbitrary maximum has been removed
         with self.assertRaises(ValueError): self.mk(limit_margin_deg=-1)
         bot = self.mk()
         bot.connect_virtual()

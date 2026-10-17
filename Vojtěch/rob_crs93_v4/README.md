@@ -1,3 +1,13 @@
+# Novinka: automatická kalibrace kruhového hoopu (bez ChArUco)
+
+Aktuální automatická kalibrace je popsána v [AUTO_HOOP_HOMOGRAPHY.md](AUTO_HOOP_HOMOGRAPHY.md).
+Ruční ChArUco homografie zůstává jako alternativa. Předchozí návody
+INSTALL_MOTION.md a INSTALL_AUTO_LIMITS.md popisují starý limit 3°/MOVE;
+pro automatický sweep platí nové instrukce. Robot nepovolí REAL `jog/goto`
+bez naměřeného `robot table Z` a `homo offset X Y Z`.
+
+---
+
 # CRS93: homografie s ChArUco + opraveny Prokopuv 6. kloub
 
 Tento adresar obsahuje hotovou integraci homografie do stavajiciho hostitele `main.py`.

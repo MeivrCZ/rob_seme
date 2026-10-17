@@ -32,27 +32,20 @@ def write_snapshot(ctx: Context):
 
 
 def request_move(ctx: Context, target, *, label: str):
-    """Operator-side preview/confirmation. Never auto-approve REAL movement."""
+    """Execute without an interactive MOVE prompt, after geometric preflight."""
     current, goal = ctx.robot.preview_move(target)
     print(f"{label} | mode={ctx.robot.mode}")
-    print("  q NOW  [deg]:", np.array2string(np.rad2deg(current), precision=2))
+    print("  q NOW [deg]:", np.array2string(np.rad2deg(current), precision=2))
     print("  q GOAL [deg]:", np.array2string(np.rad2deg(goal), precision=2))
-    print("  delta  [deg]:", np.array2string(np.rad2deg(goal - current), precision=2))
     if ctx.robot.mode == "virtual":
         ctx.robot.move_to_q(goal)
-        print("VIRTUAL joints changed (no motors, no collision simulation).")
+        print("VIRTUAL joints changed (no motors).")
         return
     if ctx.robot.mode != "real":
         raise RuntimeError("Connect robot before motion")
-    print("WARNING: REAL ROBOT WILL MOVE. No obstacle/collision checks in this app.")
-    print("Make sure cage closed, work area clear, Arm Power on, E-STOP accessible.")
-    confirmation = input("Physical move approved? Type MOVE: ")
-    if confirmation != "MOVE":
-        print("Cancelled. No motion command sent.")
-        return
-    print("Sending move_to_q; terminal waits until motion stops. Emergency: physical E-STOP.")
+    print("Sending REAL move (no individual confirmation). Physical E-STOP must be available.")
     ctx.robot.move_to_q(goal, expected_q=current)
-    print("Driver reported motion stopped. Verify physical position.")
+    print("Driver reported motion stopped.")
 
 
 def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: list[str]) -> bool:
@@ -71,13 +64,14 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   robot connect virtual    OFFLINE CRS93 kinematics - zero physical motion
   robot virtual-set deg Q0 Q1 Q2 Q3 Q4 Q5   set virtual state [degrees]
   robot virtual-set rad Q0 Q1 Q2 Q3 Q4 Q5   set virtual state [radians]
-  robot jog q0..q5 DELTA_DEG  small relative move of a single joint
+  robot jog q0..q5 DELTA_DEG  relative joint move (no interactive MOVE prompt)
   robot goto deg Q0 Q1 Q2 Q3 Q4 Q5  absolute joint target in degrees
   robot goto rad Q0 Q1 Q2 Q3 Q4 Q5  absolute joint target in radians
   robot connect home       initialize + physical hard/soft home (MOVES ROBOT)
   robot connect nohome     initialize without homing (only when reference valid)
   robot status             read joint positions and flange pose
   robot limits             show original ctu_crs limits and effective ranges [deg]
+  robot table Z           measured tabletop Z in CRS93 base coordinates [m]
   robot soft-home          reset virtual joints OR physical move (REAL ROBOT MOVES)
   robot release            REAL only: engage brakes + disconnect feedback (confirmation)
   robot disconnect         close robot connection, does not move robot
@@ -94,7 +88,8 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   homo board help          ChArUco 10x14 calibration (single frame + >=3 robot anchors)
   homo board capture       detect ChArUco corners from shared camera
   homo capture             alternate: click target centre with REAL robot/camera
-  homo auto                auto-detect unique circle, confirm with ENTER
+  homo auto                auto-detect unique circle, confirm selection with ENTER
+  homo scan help           automated hoop grid scan and homography fit
   homo solve               fit and save pixel -> robot XY mapping
   homo map U V             pixel -> robot XY at calibrated plane Z
   homo status|load|undo|clear   calibration session management
@@ -212,6 +207,12 @@ Extensions: diagnostics, homography_calibration, prokop_visualizer
             ctx.robot.assert_stationary()
             ctx.robot.close()
             print("Robot disconnected.")
+        elif len(args) == 3 and args[1] == "table":
+            ctx.robot.set_table_z(float(args[2]))
+            print(f"Tabletop in CRS93 BASE: Z={ctx.robot._table_guard.table_z_m:.4f} m; minimum clearance 0.010 m")
+        elif args[1:] == ["table"]:
+            print("Table Z:", "unset" if ctx.robot._table_guard is None else ctx.robot._table_guard.table_z_m,
+                  "hoop offset:", ctx.robot._hoop_offset_tcp)
         elif args[1:] == ["limits"]:
             raw, effective = ctx.robot.get_joint_limits_deg()
             if raw is None or effective is None:
@@ -219,7 +220,7 @@ Extensions: diagnostics, homography_calibration, prokop_visualizer
             else:
                 print("Raw ctu_crs joint limits [deg]:")
                 print(np.array2string(raw, precision=2, suppress_small=True))
-                print("Effective software limits after margin/optional restriction [deg]:")
+                print("Mechanical software limits (ctu_crs) [deg]:")
                 print(np.array2string(effective, precision=2, suppress_small=True))
                 print(f"Real motion enabled in config: {ctx.robot.real_motion_enabled}")
                 print("Software limits are NOT collision avoidance or safety-rated protection.")
@@ -239,12 +240,9 @@ Extensions: diagnostics, homography_calibration, prokop_visualizer
                 ctx.robot.soft_home()
                 print("Virtual state reset to q_home. No physical motion.")
             else:
-                ans = input("Robot WILL MOVE to home. Type MOVE: ")
-                if ans == "MOVE":
-                    ctx.robot.soft_home()
-                    print("Reached soft home.")
-                else:
-                    print("Cancelled.")
+                print("REAL soft-home: tabletop path preflight, no MOVE confirmation.")
+                ctx.robot.soft_home()
+                print("Reached soft home.")
         else:
             print("Try: robot jog q0 2 | robot goto deg Q0..Q5 | robot status | robot release | robot soft-home")
     elif command == "camera":
