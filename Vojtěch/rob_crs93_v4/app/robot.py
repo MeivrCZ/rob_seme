@@ -24,7 +24,8 @@ class RobotManager:
     def __init__(self, tty_dev: str = "/dev/mars", *,
                  real_motion_enabled: bool = False,
                  joint_limits_deg=None,
-                 max_step_deg: float = 3.0):
+                 max_step_deg: float = 3.0,
+                 limit_margin_deg: float = 2.0):
         self._io_lock = RLock()
         if not isinstance(real_motion_enabled, bool):
             raise ValueError("real_motion_enabled must be true/false")
@@ -32,12 +33,18 @@ class RobotManager:
             raise ValueError("max_step_deg must be in (0, 10] degrees")
         self.real_motion_enabled = real_motion_enabled
         self.max_step_rad = float(np.deg2rad(max_step_deg))
-        self._limits_rad = None
+        if not np.isfinite(limit_margin_deg) or not 0 <= limit_margin_deg <= 10:
+            raise ValueError("limit_margin_deg must be in [0, 10] degrees")
+        self._margin_rad = float(np.deg2rad(limit_margin_deg))
+        self._extra_limits_rad = None
+        self._limits_rad = None  # effective limit; read from ctu_crs at connection
+        self._raw_limits_rad = None  # raw driver limits before applying margin
+        self._limits_error = "Robot disconnected"
         if joint_limits_deg is not None:
             limits = np.asarray(joint_limits_deg, dtype=float)
             if limits.shape != (6, 2) or not np.all(np.isfinite(limits)) or not np.all(limits[:, 0] < limits[:, 1]):
                 raise ValueError("joint_limits_deg requires six [minimum,maximum] pairs")
-            self._limits_rad = np.deg2rad(limits)
+            self._extra_limits_rad = np.deg2rad(limits)
         self.tty_dev = tty_dev
         self._robot = None
         self.mode: str | None = None  # None, "real", "virtual"
@@ -46,6 +53,44 @@ class RobotManager:
         self._released = False  # REAL only: release requested; feedback may be off
         self._release_confirmed = False
         self._motion_uncertain = False
+
+    def _read_driver_limits(self, robot) -> None:
+        """Get q_min/q_max from *this* ctu_crs instance; fail closed if invalid.
+
+        An optional config interval can only further narrow (never replace)
+        the limits derived from the robot model. All values are radians.
+        """
+        self._limits_rad = None
+        self._raw_limits_rad = None
+        self._limits_error = "Limits unavailable"
+        try:
+            q_min = np.asarray(robot.q_min, dtype=float).reshape(-1)
+            q_max = np.asarray(robot.q_max, dtype=float).reshape(-1)
+            if (q_min.shape != (6,) or q_max.shape != (6,)
+                    or not np.all(np.isfinite(q_min))
+                    or not np.all(np.isfinite(q_max))
+                    or not np.all(q_min < q_max)):
+                raise ValueError("invalid shapes, non-finite values or inverted q_min/q_max")
+            raw = np.stack((q_min, q_max), axis=1)
+            lo = q_min + self._margin_rad
+            hi = q_max - self._margin_rad
+            if self._extra_limits_rad is not None:
+                lo = np.maximum(lo, self._extra_limits_rad[:, 0])
+                hi = np.minimum(hi, self._extra_limits_rad[:, 1])
+            self._raw_limits_rad = raw
+            if not np.all(lo < hi):
+                raise ValueError("safety margin or optional limits leave an empty joint interval")
+            self._limits_rad = np.stack((lo, hi), axis=1)
+            self._limits_error = None
+        except (AttributeError, TypeError, ValueError) as exc:
+            self._limits_error = f"Cannot read valid ctu_crs q_min/q_max: {exc}"
+
+    @_with_robot_lock
+    def get_joint_limits_deg(self) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """(raw, effective) [min,max] in degrees; none if unavailable."""
+        self.require()
+        return (None if self._raw_limits_rad is None else np.rad2deg(self._raw_limits_rad).copy(),
+                None if self._limits_rad is None else np.rad2deg(self._limits_rad).copy())
 
     @property
     def connected(self) -> bool:
@@ -74,6 +119,7 @@ class RobotManager:
             robot.close()
             raise
         self._robot = robot
+        self._read_driver_limits(robot)
         self.mode = "real"
         self._released = False
         self._release_confirmed = False
@@ -92,6 +138,7 @@ class RobotManager:
         self._virtual_q = q_home.copy()
         self._virtual_q_home = q_home.copy()
         self._robot = robot
+        self._read_driver_limits(robot)
         self.mode = "virtual"
         self._released = False
         self._release_confirmed = False
@@ -144,12 +191,12 @@ class RobotManager:
         if not self.real_motion_enabled:
             raise RuntimeError("REAL motion disabled in config.json (motion.enable_real_motion=false)")
         if self._limits_rad is None:
-            raise RuntimeError("REAL motion blocked: configure verified motion.joint_limits_deg in config.json")
+            raise RuntimeError(f"REAL motion blocked: {self._limits_error}")
         lo, hi = self._limits_rad[:, 0], self._limits_rad[:, 1]
         if np.any(current < lo) or np.any(current > hi):
-            raise RuntimeError("Current joints outside configured joint limits; refusing motion")
+            raise RuntimeError("Current joints outside effective joint limits; refusing motion")
         if np.any(target < lo) or np.any(target > hi):
-            raise ValueError("Requested target outside configured joint limits")
+            raise ValueError("Requested target outside effective joint limits")
         if np.max(np.abs(target - current)) > self.max_step_rad + 1e-10:
             raise ValueError(f"Requested real move exceeds configured {np.rad2deg(self.max_step_rad):g} deg per joint; split into small moves")
 
@@ -273,3 +320,6 @@ class RobotManager:
                 self._released = False
                 self._release_confirmed = False
                 self._motion_uncertain = False
+                self._raw_limits_rad = None
+                self._limits_rad = None
+                self._limits_error = "Robot disconnected"

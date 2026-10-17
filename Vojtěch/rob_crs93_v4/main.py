@@ -77,6 +77,7 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   robot connect home       initialize + physical hard/soft home (MOVES ROBOT)
   robot connect nohome     initialize without homing (only when reference valid)
   robot status             read joint positions and flange pose
+  robot limits             show original ctu_crs limits and effective ranges [deg]
   robot soft-home          reset virtual joints OR physical move (REAL ROBOT MOVES)
   robot release            REAL only: engage brakes + disconnect feedback (confirmation)
   robot disconnect         close robot connection, does not move robot
@@ -200,6 +201,17 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
             ctx.robot.assert_stationary()
             ctx.robot.close()
             print("Robot disconnected.")
+        elif args[1:] == ["limits"]:
+            raw, effective = ctx.robot.get_joint_limits_deg()
+            if raw is None or effective is None:
+                print(f"No usable q_min/q_max from ctu_crs: {ctx.robot._limits_error}")
+            else:
+                print("Raw ctu_crs joint limits [deg]:")
+                print(np.array2string(raw, precision=2, suppress_small=True))
+                print("Effective software limits after margin/optional restriction [deg]:")
+                print(np.array2string(effective, precision=2, suppress_small=True))
+                print(f"Real motion enabled in config: {ctx.robot.real_motion_enabled}")
+                print("Software limits are NOT collision avoidance or safety-rated protection.")
         elif args[1:] == ["status"]:
             if ctx.robot.released:
                 print("mode: real; release requested (feedback may be disconnected).")
