@@ -86,6 +86,10 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   camera status            real/replay camera status
   camera snap              save raw snapshot
   load NAME                load extension without restarting hardware
+  load all                 load every available extension (skip already loaded)
+  available                list available extensions (does not load them)
+  pview start [PORT]       load (if needed) and start Prokop visualizer
+  pview stop|status        shortcut for Prokop visualizer
   unload NAME              unload extension, hardware stays connected
   reload NAME              re-read edited extension source code
   loaded                   list loaded extensions
@@ -95,9 +99,10 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   help                     show this help
   quit                     close connections and exit
 
-Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visualizer
+Extensions: diagnostics, camera_intrinsics, charuco_calibration, eye_to_hand, prokop_visualizer
   call prokop_visualizer help
   call camera_intrinsics help
+  call charuco_calibration help
   call eye_to_hand help
 """)
     elif command == "mode":
@@ -259,6 +264,30 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
             write_snapshot(ctx)
         else:
             print("Try: camera open|close|snap|status or camera replay DIRECTORY")
+    elif command == "available" and len(args) == 1:
+        print("Available extensions:", ", ".join(manager.available()) or "(none)")
+    elif command == "load" and args[1:] == ["all"]:
+        manager.load_all()
+    elif command == "pview":
+        if len(args) not in (2, 3):
+            print("Try: pview start [PORT] | pview stop | pview status")
+        elif args[1] == "start":
+            if "prokop_visualizer" not in manager.instances:
+                manager.load("prokop_visualizer")
+            viewer = manager.instances["prokop_visualizer"]
+            running = getattr(viewer, "_running", None)
+            if callable(running) and running():
+                print("Prokop visualizer is already running.")
+                manager.call("prokop_visualizer", ["status"])
+            else:
+                manager.call("prokop_visualizer", ["start", *args[2:]])
+        elif len(args) == 2 and args[1] in ("stop", "status"):
+            if "prokop_visualizer" not in manager.instances:
+                print("Prokop visualizer is not loaded; use: pview start")
+            else:
+                manager.call("prokop_visualizer", [args[1]])
+        else:
+            print("Try: pview start [PORT] | pview stop | pview status")
     elif command in ("load", "unload", "reload") and len(args) == 2:
         getattr(manager, command)(args[1])
     elif command == "loaded":
