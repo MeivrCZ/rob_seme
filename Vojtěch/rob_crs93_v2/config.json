@@ -1,0 +1,4 @@
+{
+  "robot": {"tty_dev": "/dev/mars"},
+  "camera": {"name": "camera-crs93"}
+}
