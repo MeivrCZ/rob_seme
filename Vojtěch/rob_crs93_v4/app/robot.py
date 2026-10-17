@@ -6,10 +6,23 @@ collisions, control limits, calibration bias or the physical robot.
 from __future__ import annotations
 
 import numpy as np
+from threading import RLock
+from functools import wraps
+
+
+def _with_robot_lock(method):
+    """Prevent sync polling from racing with serial commands, homing or close."""
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._io_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
 
 
 class RobotManager:
     def __init__(self, tty_dev: str = "/dev/mars"):
+        self._io_lock = RLock()
         self.tty_dev = tty_dev
         self._robot = None
         self.mode: str | None = None  # None, "real", "virtual"
@@ -32,6 +45,7 @@ class RobotManager:
         """Whether the release API returned without error (hardware remains unverified)."""
         return self._release_confirmed
 
+    @_with_robot_lock
     def connect(self, *, home: bool) -> None:
         """Connect to the real robot ONLY. Homing may physically move the robot."""
         if self.connected:
@@ -48,6 +62,7 @@ class RobotManager:
         self._released = False
         self._release_confirmed = False
 
+    @_with_robot_lock
     def connect_virtual(self) -> None:
         """Use authentic offline CRS93 FK/IK without touching /dev/mars."""
         if self.connected:
@@ -69,6 +84,7 @@ class RobotManager:
             raise RuntimeError("Robot disconnected. Enter: robot connect virtual|home|nohome")
         return self._robot
 
+    @_with_robot_lock
     def get_q(self) -> np.ndarray:
         robot = self.require()
         if self._released:
@@ -77,9 +93,11 @@ class RobotManager:
             return self._virtual_q.copy()
         return np.asarray(robot.get_q(), dtype=float).copy()
 
+    @_with_robot_lock
     def flange_pose(self) -> np.ndarray:
         return np.asarray(self.require().fk(self.get_q()), dtype=float).reshape(4, 4)
 
+    @_with_robot_lock
     def virtual_set_q(self, joints: np.ndarray) -> None:
         """Teleport *kinematic state*, NOT a robot command. No limit checking."""
         self.require()
@@ -90,10 +108,12 @@ class RobotManager:
             raise ValueError("Expected six finite joint angles.")
         self._virtual_q = q.copy()
 
+    @_with_robot_lock
     def ik(self, pose: np.ndarray):
         """Offline/online kinematics via ctu_crs; not an action command."""
         return self.require().ik(np.asarray(pose, dtype=float))
 
+    @_with_robot_lock
     def soft_home(self) -> None:
         robot = self.require()
         if self.mode == "virtual":
@@ -104,6 +124,7 @@ class RobotManager:
             robot.soft_home()
             robot.wait_for_motion_stop()
 
+    @_with_robot_lock
     def release(self) -> None:
         """Engage brakes and disconnect feedback on a stopped REAL CRS93.
 
@@ -125,6 +146,7 @@ class RobotManager:
         release_command()
         self._release_confirmed = True
 
+    @_with_robot_lock
     def assert_stationary(self) -> None:
         """Refuse a runtime mode switch while real arm is moving.
 
@@ -143,6 +165,7 @@ class RobotManager:
         if check():
             raise RuntimeError("Robot is moving. Wait for a complete stop before switching modes.")
 
+    @_with_robot_lock
     def close(self) -> None:
         if self._robot is not None:
             try:
