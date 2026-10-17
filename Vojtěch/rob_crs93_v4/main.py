@@ -12,6 +12,7 @@ from app.robot import RobotManager
 from app.camera import CameraManager
 from app.store import CalibrationStore
 from app.extensions import ExtensionManager
+from app.modes import ModeManager
 
 ROOT = Path(__file__).resolve().parent
 SETTINGS = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
@@ -29,7 +30,7 @@ def write_snapshot(ctx: Context):
     print(f"Snapshot: {target} | resolution: {image.shape}")
 
 
-def dispatch(ctx: Context, manager: ExtensionManager, args: list[str]) -> bool:
+def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: list[str]) -> bool:
     if not args:
         return True
     command = args[0].lower()
@@ -37,6 +38,11 @@ def dispatch(ctx: Context, manager: ExtensionManager, args: list[str]) -> bool:
         return False
     if command == "help":
         print("""Commands:
+  mode status              current program mode, robot/camera backends
+  mode virtual [DIR]      simulated CRS93 + optional replay images, no hardware
+  mode real nohome        connect REAL CRS93 + Basler, when reference is valid
+  mode real home          connect REAL CRS93 + Basler, HOMING MOVES ROBOT
+  mode off                disconnect both, loaded extensions/calibrations remain
   robot connect virtual    OFFLINE CRS93 kinematics - zero physical motion
   robot virtual-set deg Q0 Q1 Q2 Q3 Q4 Q5   set virtual state [degrees]
   robot virtual-set rad Q0 Q1 Q2 Q3 Q4 Q5   set virtual state [radians]
@@ -59,12 +65,48 @@ def dispatch(ctx: Context, manager: ExtensionManager, args: list[str]) -> bool:
   help                     show this help
   quit                     close connections and exit
 
-Extensions included: diagnostics, camera_intrinsics, eye_to_hand
+Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visualizer
+  call prokop_visualizer help
   call camera_intrinsics help
   call eye_to_hand help
 """)
+    elif command == "mode":
+        if args[1:] == ["status"]:
+            print(modes.describe())
+        elif len(args) in (2, 3) and args[1] == "virtual":
+            directory = None
+            if len(args) == 3:
+                directory = Path(args[2])
+                if not directory.is_absolute():
+                    directory = ctx.root / directory
+            modes.switch_virtual(directory)
+            print(modes.describe())
+        elif args[1:] in (["real", "home"], ["real", "nohome"]):
+            if ctx.robot.mode != "real":
+                home = args[2] == "home"
+                if home:
+                    confirmation = input("HOMING WILL MOVE PHYSICAL ROBOT. Cage clear? Type HOME: ")
+                    if confirmation != "HOME":
+                        print("Cancelled.")
+                        return True
+                else:
+                    confirmation = input("Controller stayed powered AND reference valid? Type REFERENCE: ")
+                    if confirmation != "REFERENCE":
+                        print("Cancelled.")
+                        return True
+            if ctx.robot.mode == "real":
+                print("Already connected to real CRS93. No new homing will run.")
+            modes.switch_real(home=args[2] == "home")
+            print(modes.describe())
+        elif args[1:] in (["off"], ["disconnect"]):
+            modes.disconnect()
+            print(modes.describe())
+        else:
+            print("Try: mode status | mode virtual [DIR] | mode real home|nohome | mode off")
     elif command == "robot":
         if args[1:] == ["connect", "virtual"]:
+            if ctx.camera.mode == "real":
+                raise RuntimeError("Close the real camera first or use: mode virtual")
             ctx.robot.connect_virtual()
             print("Virtual CRS93 connected - FK/IK model only. No physical hardware touched.")
         elif len(args) == 9 and args[1:3] == ["virtual-set", "deg"]:
@@ -77,6 +119,8 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand
         elif args[1:] == ["connect", "home"]:
             ans = input("Homing WILL MOVE the robot. Cage clear, permitted to operate? Type HOME: ")
             if ans == "HOME":
+                if ctx.camera.mode == "replay":
+                    raise RuntimeError("Replay camera active; use: mode real home")
                 ctx.robot.connect(home=True)
                 print("Robot connected; hard/soft home complete.")
             else:
@@ -84,11 +128,14 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand
         elif args[1:] == ["connect", "nohome"]:
             ans = input("Use only if controller stayed powered and joints remain referenced. Type REFERENCE: ")
             if ans == "REFERENCE":
+                if ctx.camera.mode == "replay":
+                    raise RuntimeError("Replay camera active; use: mode real nohome")
                 ctx.robot.connect(home=False)
                 print("Robot connected without homing (reference validity is your responsibility).")
             else:
                 print("Cancelled.")
         elif args[1:] == ["disconnect"]:
+            ctx.robot.assert_stationary()
             ctx.robot.close()
             print("Robot disconnected.")
         elif args[1:] == ["status"]:
@@ -112,12 +159,16 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand
             print("Try: robot connect virtual|home|nohome, robot virtual-set deg|rad Q0..Q5, robot status|soft-home|disconnect")
     elif command == "camera":
         if args[1:] == ["open"]:
+            if ctx.robot.mode == "virtual":
+                raise RuntimeError("In VIRTUAL mode use replay, or switch via: mode real nohome|home")
             ctx.camera.open()
             print(f"Camera opened: {ctx.camera.name}")
         elif args[1:] == ["close"]:
             ctx.camera.close()
             print("Camera closed.")
         elif len(args) == 3 and args[1] == "replay":
+            if ctx.robot.mode == "real":
+                raise RuntimeError("Real robot active; use: mode virtual DIRECTORY")
             directory = Path(args[2])
             if not directory.is_absolute():
                 directory = ctx.root / directory
@@ -153,7 +204,8 @@ def main() -> None:
         calibration=CalibrationStore(ROOT / "data" / "calibration"),
     )
     manager = ExtensionManager(ctx)
-    print("CRS93 host ready. Hardware is NOT initialized. Enter 'help'.")
+    modes = ModeManager(ctx)
+    print("CRS93 host ready in DISCONNECTED mode. Enter 'mode virtual' or 'help'.")
     try:
         while True:
             try:
@@ -161,7 +213,7 @@ def main() -> None:
             except EOFError:
                 break
             try:
-                if not dispatch(ctx, manager, shlex.split(line)):
+                if not dispatch(ctx, manager, modes, shlex.split(line)):
                     break
             except (ValueError, RuntimeError, ImportError, OSError) as exc:
                 print(f"[error] {type(exc).__name__}: {exc}")

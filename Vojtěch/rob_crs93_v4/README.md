@@ -1,3 +1,67 @@
+# CRS93 v3 – přepínání REAL / VIRTUAL za běhu
+
+Toto je rozšíření předchozí verze. Kompletní README.md obsahuje i původní kalibrace.
+
+## Instalace
+
+    python -m pip install -r requirements.txt
+    python main.py
+
+## Nejdůležitější příkazy
+
+    mode status
+    mode virtual
+    mode virtual data/captures/intrinsics
+    mode real nohome
+    mode real home
+    mode virtual
+    mode off
+
+- `mode virtual [DIR]`: používá CRS93(tty_dev=None) pro kinematiku; se zadaným adresářem přehrává uložené PNG/JPG snímky. Žádná fyzická zařízení se nepřipojují. Bez snímků je kamera zavřená (virtuální kamera nesyntetizuje obraz).
+- `mode real nohome`: otevře Basler, potom připojí fyzického robota bez homingu. Vyžaduje potvrzení `REFERENCE`. Pouze pokud řídicí jednotka zůstala napájená a klouby jsou referencované!
+- `mode real home`: otevře Basler, potom připojí fyzického robota s homingem – robot se skutečně POHNE. Vyžaduje potvrzení `HOME`.
+- `mode off`: odpojí kameru a robota, nechá ale program a extensions běžet.
+- `mode status`: vypíše obě zařízení a aktuální režim. Režim `PARTIAL` znamená například jen otevřenou Basler kameru pro vnitřní kalibraci, zatímco robot je odpojený.
+
+Načtené extensions i soubory v `data/calibration` zůstávají beze změny. Při přechodu REAL -> VIRTUAL -> REAL -> VIRTUAL se obnoví poslední virtuální konfigurace kloubů a poslední použitý adresář snímků. Přepnutí do VIRTUAL se odmítne, pokud fyzický robot hlásí pohyb. Při neúspěšném otevření Basler zůstane VIRTUAL aktivní; při selhání připojení reálného robota se program pokusí virtuální backend obnovit.
+
+## Typická práce při vývoji
+
+    mode virtual data/captures/intrinsics
+    load diagnostics
+    call diagnostics pose
+    robot virtual-set deg 0 -20 10 0 15 0
+    reload diagnostics
+    mode status
+
+Na stanici CRS93 pak přepnutí:
+
+    mode real nohome
+    camera snap
+    mode virtual
+
+`mode real nohome` je bezpečné jen při platné referenci. Jinak je nutné `mode real home` po zajištění pracoviště, přítomnosti obsluhy a potvrzení.
+
+## Zásadní poznámky k perception a kalibraci
+
+- Fotografie stolu pořízené telefonem jsou pouze orientační. Nesmí být považovány za snímky pevné kamery Basler pro její intrinsics / extrinsics.
+- Odhad výšky Basler cca 1,15 m je přibližný. Není náhradou za výpočet kalibrace.
+- Deska na fotografii **vypadá jako ChArUco**, ale přesná identita vzoru, slovník markerů, rozměry čtverců a markerů ještě nejsou ověřeny.
+- Původní extension `camera_intrinsics.py` momentálně používá klasickou OpenCV detekci *šachovnice*, nikoliv speciální ChArUco detektor. Pro konkrétní ChArUco desku budeme po zjištění rozměrů a ID/slovníku potřebovat samostatnou detekci a odpovídající kalibrační postup.
+- Offline režim **není grafický ani fyzikální simulátor** a automaticky negeneruje syntetické obrazy. Virtuální kinematika poskytuje pózu koncového členu, replay používá uložené reálné snímky.
+- V reálném režimu mohou jiné aplikace, například Pylon Viewer, blokovat otevření kamery. Před `mode real ...` je zavřete.
+- Extensions musí používat `ctx.robot` a `ctx.camera` až v době volání. Pokud si uloží starý interní objekt robota/kamery napřímo, přepnutí může takový odkaz zneplatnit.
+
+## Testy
+
+    python -m unittest discover -s tests -v
+
+Testy používají náhrady fyzického hardwaru. Žádný robot se při jejich spuštění nepohybuje. Komunikaci s reálnou stanicí je nutné ověřit zvlášť.
+
+---
+
+## Starší dokumentace (v2)
+
 # CRS93 – modulární řízení a offline testování (v2)
 
 Malý **dlouho běžící Python proces** spravuje CRS93 a Basler kameru. Extensions lze upravovat a načítat za běhu bez zavírání hardwarových spojení. Kalibrační výsledky jsou uloženy v `data/calibration/` a snímky v `data/captures/`. **Verze 2** navíc přidává virtuální kinematický model CRS93, offline přehrávání snímků a vnější eye-to-hand kalibraci; stručné příkazy jsou ve druhé části tohoto návodu.
@@ -195,3 +259,19 @@ Testy (bez hardwaru a `ctu_crs`):
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+
+## Prokopova vizualizace – extension
+
+Do `extensions/prokop_visualizer.py` je přidaný adaptér, který z našeho hostu spouští a zastavuje externí `Prokop/view_models.py` v samostatném procesu. Prokopovy originální soubory se nemění. `Prokop/` musí být vedle této složky nebo v některé nadřazené složce repozitáře. V rootu sdíleného repozitáře nainstalujte závislosti (`uv sync`) a spouštějte host uv prostředím, např. `uv run python <nase_slozka>/main.py`.
+
+```text
+crs93> mode virtual
+crs93> load prokop_visualizer
+crs93> call prokop_visualizer start
+crs93> call prokop_visualizer status
+crs93> call prokop_visualizer stop
+crs93> unload prokop_visualizer
+```
+
+Prokop aktuálně používá model CRS97, zatímco host CRS93. Tato první integrace **nesynchronizuje klouby**; k tomu budeme potřebovat sjednotit model robota a upravit API vizualizace.

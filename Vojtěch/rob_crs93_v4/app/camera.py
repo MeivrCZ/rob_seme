@@ -9,6 +9,7 @@ class CameraManager:
         self._camera = None
         self._replay_files: list[Path] = []
         self._replay_idx = 0
+        self._replay_dir: Path | None = None
 
     @property
     def mode(self) -> str | None:
@@ -17,6 +18,10 @@ class CameraManager:
         if self._replay_files:
             return "replay"
         return None
+
+    @property
+    def replay_directory(self) -> Path | None:
+        return self._replay_dir
 
     @property
     def connected(self) -> bool:
@@ -37,9 +42,8 @@ class CameraManager:
             raise
         self._camera = camera
 
-    def open_replay(self, directory: Path) -> None:
-        if self.connected:
-            raise RuntimeError("Camera already open; close it before changing mode.")
+    @staticmethod
+    def validate_replay_directory(directory: Path) -> list[Path]:
         directory = Path(directory)
         if not directory.is_dir():
             raise ValueError(f"Replay directory not found: {directory}")
@@ -47,8 +51,15 @@ class CameraManager:
                        if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"})
         if not files:
             raise ValueError(f"No image files found: {directory}")
+        return files
+
+    def open_replay(self, directory: Path) -> None:
+        if self.connected:
+            raise RuntimeError("Camera already open; close it before changing mode.")
+        files = self.validate_replay_directory(directory)
         self._replay_files = files
         self._replay_idx = 0
+        self._replay_dir = Path(directory).resolve()
 
     def capture(self):
         if self.mode == "replay":
@@ -74,3 +85,4 @@ class CameraManager:
                 self._camera = None
         self._replay_files = []
         self._replay_idx = 0
+        self._replay_dir = None

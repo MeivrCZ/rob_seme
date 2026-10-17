@@ -84,6 +84,20 @@ class RobotManager:
             robot.soft_home()
             robot.wait_for_motion_stop()
 
+    def assert_stationary(self) -> None:
+        """Refuse a runtime mode switch while real arm is moving.
+
+        This check is not a substitute for a safety-rated stop.
+        """
+        if self.mode != "real":
+            return
+        robot = self.require()
+        check = getattr(robot, "in_motion", None)
+        if not callable(check):
+            raise RuntimeError("Cannot check robot motion; refusing mode switch.")
+        if check():
+            raise RuntimeError("Robot is moving. Wait for a complete stop before switching modes.")
+
     def close(self) -> None:
         if self._robot is not None:
             try:
