@@ -9,6 +9,7 @@ import json
 import numpy as np
 
 from homography_capture import HomographySession
+from charuco_homography import CharucoHomographySession
 
 
 class _CaptureBridge:
@@ -40,6 +41,8 @@ class HomographyExtension:
     def __init__(self, ctx):
         self.ctx = ctx
         self.session = HomographySession(folder=ctx.root / "data" / "homography")
+        self.board = CharucoHomographySession(folder=ctx.root / "data" / "homography")
+        self.board.load()
         # Load samples for status and continuation, not robot/camera hardware.
         if (self.session.folder / "samples.json").is_file():
             saved = json.loads((self.session.folder / "samples.json").read_text(encoding="utf-8"))
@@ -49,6 +52,13 @@ class HomographyExtension:
     def run(self, argv: list[str]) -> None:
         if not argv or argv == ["help"]:
             print("""Homografie: jedna rovina Z, pixel (u,v) -> robot (X,Y) [m].
+  homo board config SQUARE_MM MARKER_MM     rozmery tiskle ChArUco desky
+  homo board capture           nafot a detekuj ChArUco rohy (kamera REAL i replay)
+  homo board status            vypis detekovane ID a cestu k obrazku s ID
+  homo board teach ID          uloz referencni XYZ z TCP skutecneho stojiciho robota
+  homo board anchor ID X Y Z  referencni XYZ zadane rucne [m]
+  homo board solve             vypocti H z rohu a alespon 3 referenci
+  homo board clear             novy snimek a nove reference
   homo capture           vyber stred terce kliknutim (ENTER potvrdi, ESC zrusi)
   homo auto              pokus o kruh (ENTER potvrdi, klik opravi, ESC zrusi)
   homo offset X Y Z      nastav presny posun stredu terce v TCP [m] PRED snimanim
@@ -57,14 +67,17 @@ class HomographyExtension:
   homo status            vypise pocet bodu, offset, chybu a ulozeni
   homo load|undo|clear   obnov / odeber posledni / vymaz vzorky
 
-Na TCP musi byt pevne pridelany viditelny terc. Polohy v prostoru
-zachycuji STRED terce, ne automaticky TCP, pokud je terc posunuty.
-Robotem hybej POUZE oddelenymi schvalenymi prikazy; tato extension nehybe.
-Kalibruj alespon 8-20 poloh po plose, se stejnou vyskou Z.
-POZOR: pro skutecnou kalibraci potrebujes REAL robot + REAL kameru.""")
+ChArUco: nase deska je 10x14 DICT_4X4_100 legacy. Polož JI NAPLOCHO
+a NEHYBEJ s ni mezi capture a teach! Pro prevod do robot XYZ jsou potreba
+alespon 3 nekolinearni rohy, ktere presne zmeris/ukazes TCP nebo zadas.
+Rohy i fyzicke referencni body musi byt ve stejne rovine Z. Puvodni
+homo capture/auto alternativa pouziva terc na TCP, 8-20 pozic.
+Zadne prikazy homo nehybou robotem.""")
             return
         cmd = argv[0].lower()
-        if cmd in ("capture", "auto") and len(argv) == 1:
+        if cmd == "board":
+            self._board_command(argv[1:])
+        elif cmd in ("capture", "auto") and len(argv) == 1:
             # Do not silently generate physically false results from replay + virtual FK.
             if self.ctx.robot.mode != "real" or self.ctx.camera.mode != "real":
                 raise RuntimeError("Capture vyzaduje REAL robot + REAL kameru (mode real home|nohome).")
@@ -101,8 +114,95 @@ POZOR: pro skutecnou kalibraci potrebujes REAL robot + REAL kameru.""")
             print(self.session.status())
             print(f"Target offset in TCP: {self.session.target_offset_tcp_m} m")
             print(f"File: {self.session.folder / 'homography.npz'}")
+            print(self.board.status())
         else:
-            raise ValueError("Try: homo help | capture | auto | offset X Y Z | solve | map U V | status | load | undo | clear")
+            raise ValueError("Try: homo help | board ... | capture | auto | offset X Y Z | solve | map U V | status | load | undo | clear")
+
+
+    def _invalidate_calibration(self):
+        """Any edit to ChArUco observations/anchors makes the saved H unusable."""
+        self.session.homography = None
+        self.session.is_dirty = True
+        self.session.save_samples()
+
+    def _board_command(self, argv: list[str]):
+        if not argv or argv == ["help"]:
+            print("""ChArUco homografie, 10x14 squares / DICT_4X4_100 / legacy:
+  homo board config SQUARE_MM MARKER_MM    zmerit skutecne rozmery (neodhadovat)
+  homo board capture                       detekuje a ulozi fotografii a ID rohu
+  homo board status                        seznam ID; obrazek charuco_ids.png
+  homo board anchor ID X Y Z               souradnice daneho rohu v baze robota [m]
+  homo board teach ID                      robota rucne nastav NAD dany roh; sejme
+                                           TCP XYZ (nutny REAL stav, bez pohybu)
+  homo board solve                         vypocet H (>=3 nekolinearni reference)
+  homo board clear                         smaz detekci a reference (rozmery ponecha)
+
+Kamera ani sachovnice se mezi capture a anchor/teach nesmi hybat.
+Pro teach musi poloha spicky TCP presne odpovidat rohu v XY a Z musi
+odpovidat rovine sachovnice. Opravnene posouvej robota POUZE jinymi prikazy.
+Nejdriv vyber 3 od sebe vzdalene rohy z charuco_ids.png.
+""")
+            return
+        cmd = argv[0].lower()
+        if cmd == "config" and len(argv) == 3:
+            self.board.set_dimensions(float(argv[1]), float(argv[2]))
+            self._invalidate_calibration()
+            print(self.board.status())
+        elif cmd == "capture" and len(argv) == 1:
+            if self.ctx.camera.mode not in ("real", "replay"):
+                raise RuntimeError("Otevri kameru: camera open | camera replay DIR")
+            n = self.board.capture(self.ctx.camera.capture())
+            self._invalidate_calibration()
+            print(f"Detekovano {n} ChArUco rohu, ulozena fotka s ID: {self.board.preview_path}")
+            print("Vyber alespon 3 vzdalené ID rohu a zadej homo board teach/anchor")
+        elif cmd == "anchor" and len(argv) == 5:
+            self.board.add_anchor(int(argv[1]), tuple(float(v) for v in argv[2:]))
+            self._invalidate_calibration()
+            print(f"Ulozen roh {int(argv[1])}, celkem referenci {len(self.board.anchors)}")
+        elif cmd == "teach" and len(argv) == 2:
+            if self.ctx.robot.mode != "real" or self.ctx.robot.released:
+                raise RuntimeError("Teach vyzaduje REAL referencovany robot s aktivnim feedbackem")
+            target_id = int(argv[1])
+            if target_id not in self.board.ids:
+                raise ValueError(f"ID {target_id} neni na desce; viz {self.board.preview_path.name}")
+            bridge = _CaptureBridge(self.ctx)
+            bridge.in_motion()
+            q = np.asarray(bridge.get_q(), dtype=float)
+            T = np.asarray(bridge.fk(q), dtype=float)
+            if T.shape != (4, 4) or not np.isfinite(T).all():
+                raise RuntimeError("Neplatna FK pro teach")
+            offset = np.asarray([*self.session.target_offset_tcp_m, 1.0])
+            xyz = (T @ offset)[:3]
+            bridge.in_motion()
+            if not np.allclose(bridge.get_q(), q, atol=1e-3):
+                raise RuntimeError("Robot se behem teach pohnul; nic neulozeno")
+            self.board.add_anchor(target_id, tuple(xyz))
+            self._invalidate_calibration()
+            print(f"Kotva ChArUco ID {target_id}: robot XYZ={xyz.round(5)} m")
+        elif cmd == "solve" and len(argv) == 1:
+            calib, rms_m = self.board.solve()
+            # Commit only a successfully solved board mapping, and do not mix
+            # robot-target samples with ChArUco-based correspondences.
+            self.session.samples.clear()
+            self.session.image_size = calib.image_size
+            self.session.homography = calib
+            self.session.is_dirty = False
+            self.session.save_samples()
+            calib.save(self.session.folder / "homography.npz")
+            print(f"ChArUco H ulozena. Pixel RMS {calib.rms_px:.2f} px, "
+                  f"RANSAC {calib.inliers}/{calib.total}; "
+                  f"referencni XY RMS {rms_m*1000:.2f} mm, Z={calib.z_m:.4f} m")
+            print("POZOR: H plati pouze v rovine desky; map mimo detekovanou oblast je blokovan.")
+        elif cmd == "clear" and len(argv) == 1:
+            self.board.clear_observations()
+            self._invalidate_calibration()
+            print("ChArUco pozorovani a kotvy smazany; rozmery zachovany")
+        elif cmd == "status" and len(argv) == 1:
+            print(self.board.status())
+            print("Detekovana ID:", self.board.ids)
+            print("Kotvy:", self.board.anchors)
+        else:
+            raise ValueError("homo board help|config SQUARE_MM MARKER_MM|capture|status|anchor ID X Y Z|teach ID|solve|clear")
 
 
 def setup(ctx):

@@ -91,7 +91,9 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   pview start [PORT]       load (if needed) and start Prokop visualizer
   pview stop|status        shortcut for Prokop visualizer
   homo help                homography commands (no intrinsics/extrinsics)
-  homo capture             click target centre, use REAL camera + stopped robot
+  homo board help          ChArUco 10x14 calibration (single frame + >=3 robot anchors)
+  homo board capture       detect ChArUco corners from shared camera
+  homo capture             alternate: click target centre with REAL robot/camera
   homo auto                auto-detect unique circle, confirm with ENTER
   homo solve               fit and save pixel -> robot XY mapping
   homo map U V             pixel -> robot XY at calibrated plane Z

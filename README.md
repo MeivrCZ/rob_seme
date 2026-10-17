@@ -1,9 +1,7 @@
-# ROB sem – CRS93
+# ROB sem: CRS93 homografie a Prokop viewer
 
-Projekt obsahuje Prokopovu vizualizaci, kod CRS93 v `Vojtěch/rob_crs93_v4`
-a puvodni podklady. Homograficka kalibrace nahrazuje intrinsics/extrinsics.
+Aktualizovany navod je v `Vojtěch/rob_crs93_v4/README.md`.
 
-**Postup kalibrace a prikazy:** viz `Vojtěch/rob_crs93_v4/README.md`.
-
-**Prokop:** oprava posledniho kloubu o 180° je aplikovana primo do
-`Prokop/view_models.py`; zadny dalsi patch se nespousti.
+Pro kalibraci ti staci ChArUco deska naplocho, jeden snimek,
+tri roboticky zname body a prikaz `homo board solve`.
+Oprava vizualizacniho offsetu 6. kloubu v `Prokop/view_models.py` zustava.

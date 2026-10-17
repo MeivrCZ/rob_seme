@@ -265,7 +265,8 @@ class HomographySession:
         self.save_samples()
 
     def status(self) -> str:
-        z = np.median([s["xyz_m"][2] for s in self.samples]) if self.samples else None
+        z = (np.median([s["xyz_m"][2] for s in self.samples]) if self.samples
+             else self.homography.z_m if self.homography and not self.is_dirty else None)
         info = f"Homografie: {len(self.samples)} bodu, obraz {self.image_size}, Z={z}"
         if self.homography and not self.is_dirty:
             info += f", RMS={self.homography.rms_px:.2f} px"

@@ -1,4 +1,4 @@
-# CRS93: kalibrace homografii a Prokopuv 6. kloub
+# CRS93: homografie s ChArUco + opraveny Prokopuv 6. kloub
 
 Tento adresar obsahuje hotovou integraci homografie do stavajiciho hostitele `main.py`.
 Driv pouzivane `charuco_calibration`, `camera_intrinsics`, `eye_to_hand` byly ze
@@ -17,6 +17,74 @@ python main.py
 Standardni prikazy hostitele (`mode`, `robot`, `camera`, `load all`, `pview start`)
 zustaly. Prikaz `homo` automaticky nacte `homography_calibration` do pameti,
 stejne jako `pview start` pro vizualizer. `homo help` vypise podrobnosti.
+
+## Doporuceno: ChArUco deska -> homografie v robotich souradnicich
+
+Puvodni desku **vyuzijeme**, ale **ne pro intrinsics/extrinsics**. Je to plošny
+referencni vzor pro primou homografii `pixel -> CRS93 (X,Y)`.
+Sablona z puvodniho projektu: **10 x 14 ctvercu, DICT_4X4_100, legacy
+pattern, 117 vnitřních rohů**. Rozmery tisku ale musi byt fyzicky zmerene.
+
+1. **Poloz desku naplocho a bez pohybu na stul**, do zorneho pole kamery.
+   Musi lezet v rovine konstantniho Z vuci bazi CRS93 (deska nesmi byt sikmo).
+   Jakmile zachytis snimek, **uz desku nepresouvej** az do dokončení solve.
+2. Spust `python main.py`; pro skutecny obraz proved `camera open` (bez
+   automatickeho pohybu robota). Volitelne `camera replay DIR` pro test dat.
+3. Pomoci pravitka zmer skutecnou delku strany bileho/cerneho **ctverce** a
+   strany **ArUco markeru**, napr. cisla 20 a 15 jsou *pouze priklad*:
+   ```text
+   homo board config 20 15
+   homo board capture
+   homo board status
+   ```
+   V `data/homography/charuco_ids.png` otevri obrazek s vykreslenymi ID rohu.
+   `capture` automaticky detekuje rohy, nemusis s papirkem tocit ani klikat.
+4. Vyber **alespon 3 nekolinearni, navzajem vzdalene** vnitrni rohy (jejich
+   ID jsou v obrazku). Pro urceni jejich souradnic v baze robota mas moznosti:
+   - **Teach fyzickym robotem**: opravneny clovek mimo tento modul postavi
+     skutecnou *znamou spicku TCP* presne do daneho vnitrniho rohu (ve stejne
+     XY a Z poloze). Pak po uplnem zastaveni prikaz:
+     `homo board teach ID` (napr. `homo board teach 8`). Tento prikaz **jen cte
+     FK**, s robotem nijak nehybe. Pokud spicka nelezi v TCP, nejdriv zmer a
+     nastav `homo offset X Y Z` ve **souradnicich TCP v metrech**.
+   - **Rucni souradnice**: pokud presne znas xyz daneho rohu v baze CRS93,
+     zadej `homo board anchor ID X Y Z` (v **metrech**).
+   U vsech tri bodu musi **Z odpovidat rovine povrchu desky**, jinak bude
+   vysledna homografie prirazena ke spatne vysce.
+5. Spust `homo board solve`, pote `homo status` a `homo map U V`. Over vice
+   **nezavislych** bodu v mm. Snimek a souřadnice jsou ulozeny v
+   `data/homography/` a znovu se nactou po restartu.
+
+### Strucny seznam prikazu
+
+```text
+camera open                             otevri skutecnou Basler kameru
+homo board help                         vsechny prikazy ChArUco
+homo board config SQUARE_MM MARKER_MM   rozmery vzoru [mm]; legacy 10x14
+homo board capture                      automaticky snimek + detekce a ID
+homo board status                       nalezena ID a referencni body
+homo board teach ID                     referencni XYZ ze stojiciho REAL TCP
+homo board anchor ID X Y Z              referencni XYZ rucne [m]
+homo board solve                        vypocti H a ulozi ji
+homo board clear                        smaz snimek a reference, nech rozmery
+homo map U V                            prepocti pixel na XYZ roviny (X,Y)
+```
+
+**Omezeni:** Homografie funguje pouze pro danou rovinu Z; meni-li se vyska
+objektu, meni se i spravny prepočet. Proto je vhodne kalibrovat desku v
+rovine, v niz chces detekovat body objektu. Pokud deska pokryva jen cast
+zorneho pole kamery, program zamerne **odmitne prepocet mimo oblast desky**
+(misto nebezpecne extrapolace do nezmerene casti). Pro plne pokryti plochy
+48 x 30 cm potrebujes dostatecne velkou desku nebo dalsi reference v
+jejich castich. Bez znalosti polohy desky **v souradnicich robota** nelze z
+jedineho snimku vypocitat pixely primo na CRS93 XYZ; 3 referencni body jsou
+opravdu nezbytne. Kalibrace nepocita korekci optickeho zkresleni objektivu.
+
+---
+
+## Alternativa: kalibrace kruhovym tercem pripevnenym na robotovi
+
+Nasledujici starsi postup stale funguje, pokud nechces pouzit ChArUco.
 
 ## Kalibrace krok po kroku
 
