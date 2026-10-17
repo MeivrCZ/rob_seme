@@ -14,9 +14,9 @@ class OfflineTests(unittest.TestCase):
     def test_persistent_calibration(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = CalibrationStore(Path(tmp))
-            store.save("camera_intrinsics", {"camera_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]})
-            self.assertEqual(store.names(), ["camera_intrinsics"])
-            self.assertEqual(store.load("camera_intrinsics")["camera_matrix"][0][0], 1)
+            store.save("calibration_example", {"metadata": [1, 2, 3]})
+            self.assertEqual(store.names(), ["calibration_example"])
+            self.assertEqual(store.load("calibration_example")["metadata"][0], 1)
 
     def test_extensions_do_not_connect_hardware(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -30,13 +30,13 @@ class OfflineTests(unittest.TestCase):
             mgr.unload("diagnostics")
             self.assertEqual(mgr.instances, {})
 
-    def test_intrinsics_help_without_camera(self):
+    def test_homography_help_without_camera(self):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = Context(Path(tmp), RobotManager(), CameraManager(), CalibrationStore(Path(tmp) / "calib"))
             mgr = ExtensionManager(ctx)
-            mgr.load("camera_intrinsics")
-            mgr.call("camera_intrinsics", ["help"])
-            mgr.unload("camera_intrinsics")
+            mgr.load("homography_calibration")
+            mgr.call("homography_calibration", ["help"])
+            mgr.unload("homography_calibration")
 
 
 if __name__ == "__main__":

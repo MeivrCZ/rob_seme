@@ -42,6 +42,7 @@ ROW_X = 0.9  # m, distance of the gallery row in front of the robot (out of reac
 SPIN_PERIOD = 16.0  # s per revolution of the turntable; PLACEHOLDER, to be measured
 SPIN_FPS = 30.0  # turntable animation rate
 MAX_JUMP = 0.5  # rad, max joint change per freehand drag update
+JOINT6_VIEW_OFFSET_RAD = np.pi  # Prokop model: sixth joint zero is visually 180 degrees off
 # Initial placement: turntable in front of the robot, base centred on it.
 INITIAL_PLACEMENT = Placement(np.array([0.45, 0.0]), np.zeros(2), 0.0)
 FRAME_AXES = 0.03  # m, length of the link frame axes
@@ -226,13 +227,24 @@ def main() -> None:
         "/flange_gizmo", scale=0.12, visible=False)
     q_now = np.zeros(6)
 
+    def display_q(q: np.ndarray) -> np.ndarray:
+        """Only the URDF/Viser renderer gets joint-6 correction.
+
+        Never modify feedback, slider state, IK/FK inputs or real robot commands.
+        """
+        shown = np.asarray(q, dtype=float).copy()
+        if shown.shape != (6,):
+            raise ValueError("Viewer expects six joint angles in radians")
+        shown[5] += JOINT6_VIEW_OFFSET_RAD
+        return shown
+
     def set_q(q: np.ndarray, sync_sliders: bool = True,
               sync_gizmo: bool = True) -> None:
         """Show configuration @q and sync the GUI. Programmatic GUI updates fire
         on_update with event.client None, which the handlers below ignore."""
         nonlocal q_now
         q_now = np.array(q, dtype=float)
-        robot_vis.update_cfg(q_now)
+        robot_vis.update_cfg(display_q(q_now))  # render-only 180 deg sixth joint offset
         update_link_frames(robot_frames, robot_urdf)
         T = robot_urdf.get_transform("adapter_front", robot_urdf.base_link) @ HOOP_MOUNT
         hoop_root.wxyz, hoop_root.position = wxyz(T), T[:3, 3]

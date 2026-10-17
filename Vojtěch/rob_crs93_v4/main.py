@@ -90,6 +90,12 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   available                list available extensions (does not load them)
   pview start [PORT]       load (if needed) and start Prokop visualizer
   pview stop|status        shortcut for Prokop visualizer
+  homo help                homography commands (no intrinsics/extrinsics)
+  homo capture             click target centre, use REAL camera + stopped robot
+  homo auto                auto-detect unique circle, confirm with ENTER
+  homo solve               fit and save pixel -> robot XY mapping
+  homo map U V             pixel -> robot XY at calibrated plane Z
+  homo status|load|undo|clear   calibration session management
   unload NAME              unload extension, hardware stays connected
   reload NAME              re-read edited extension source code
   loaded                   list loaded extensions
@@ -99,11 +105,9 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   help                     show this help
   quit                     close connections and exit
 
-Extensions: diagnostics, camera_intrinsics, charuco_calibration, eye_to_hand, prokop_visualizer
+Extensions: diagnostics, homography_calibration, prokop_visualizer
   call prokop_visualizer help
-  call camera_intrinsics help
-  call charuco_calibration help
-  call eye_to_hand help
+  call homography_calibration help
 """)
     elif command == "mode":
         if args[1:] == ["status"]:
@@ -268,6 +272,10 @@ Extensions: diagnostics, camera_intrinsics, charuco_calibration, eye_to_hand, pr
         print("Available extensions:", ", ".join(manager.available()) or "(none)")
     elif command == "load" and args[1:] == ["all"]:
         manager.load_all()
+    elif command in ("homo", "homography"):
+        if "homography_calibration" not in manager.instances:
+            manager.load("homography_calibration")
+        manager.call("homography_calibration", args[1:])
     elif command == "pview":
         if len(args) not in (2, 3):
             print("Try: pview start [PORT] | pview stop | pview status")
