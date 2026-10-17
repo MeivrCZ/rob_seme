@@ -1,0 +1,7 @@
+{
+  "motion": {
+    "real_motion_enabled": false,
+    "joint_limits_deg": null,
+    "max_step_deg": 3.0
+  }
+}

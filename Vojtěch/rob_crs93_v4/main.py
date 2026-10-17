@@ -6,6 +6,7 @@ import shlex
 from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid4
+import numpy as np
 
 from app.context import Context
 from app.robot import RobotManager
@@ -30,6 +31,30 @@ def write_snapshot(ctx: Context):
     print(f"Snapshot: {target} | resolution: {image.shape}")
 
 
+def request_move(ctx: Context, target, *, label: str):
+    """Operator-side preview/confirmation. Never auto-approve REAL movement."""
+    current, goal = ctx.robot.preview_move(target)
+    print(f"{label} | mode={ctx.robot.mode}")
+    print("  q NOW  [deg]:", np.array2string(np.rad2deg(current), precision=2))
+    print("  q GOAL [deg]:", np.array2string(np.rad2deg(goal), precision=2))
+    print("  delta  [deg]:", np.array2string(np.rad2deg(goal - current), precision=2))
+    if ctx.robot.mode == "virtual":
+        ctx.robot.move_to_q(goal)
+        print("VIRTUAL joints changed (no motors, no collision simulation).")
+        return
+    if ctx.robot.mode != "real":
+        raise RuntimeError("Connect robot before motion")
+    print("WARNING: REAL ROBOT WILL MOVE. No obstacle/collision checks in this app.")
+    print("Make sure cage closed, work area clear, Arm Power on, E-STOP accessible.")
+    confirmation = input("Physical move approved? Type MOVE: ")
+    if confirmation != "MOVE":
+        print("Cancelled. No motion command sent.")
+        return
+    print("Sending move_to_q; terminal waits until motion stops. Emergency: physical E-STOP.")
+    ctx.robot.move_to_q(goal, expected_q=current)
+    print("Driver reported motion stopped. Verify physical position.")
+
+
 def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: list[str]) -> bool:
     if not args:
         return True
@@ -46,6 +71,9 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   robot connect virtual    OFFLINE CRS93 kinematics - zero physical motion
   robot virtual-set deg Q0 Q1 Q2 Q3 Q4 Q5   set virtual state [degrees]
   robot virtual-set rad Q0 Q1 Q2 Q3 Q4 Q5   set virtual state [radians]
+  robot jog q0..q5 DELTA_DEG  small relative move of a single joint
+  robot goto deg Q0 Q1 Q2 Q3 Q4 Q5  absolute joint target in degrees
+  robot goto rad Q0 Q1 Q2 Q3 Q4 Q5  absolute joint target in radians
   robot connect home       initialize + physical hard/soft home (MOVES ROBOT)
   robot connect nohome     initialize without homing (only when reference valid)
   robot status             read joint positions and flange pose
@@ -111,12 +139,28 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
             ctx.robot.connect_virtual()
             print("Virtual CRS93 connected - FK/IK model only. No physical hardware touched.")
         elif len(args) == 9 and args[1:3] == ["virtual-set", "deg"]:
-            import numpy as np
             ctx.robot.virtual_set_q(np.deg2rad([float(n) for n in args[3:]]))
             print("Virtual joint configuration set (degrees).")
         elif len(args) == 9 and args[1:3] == ["virtual-set", "rad"]:
             ctx.robot.virtual_set_q([float(n) for n in args[3:]])
             print("Virtual joint configuration set (radians).")
+        elif len(args) == 4 and args[1] == "jog":
+            joint = args[2].lower()
+            if len(joint) != 2 or joint[0] != "q" or joint[1] not in "012345":
+                raise ValueError("Joint must be q0, q1, q2, q3, q4 or q5")
+            delta_deg = float(args[3])
+            if not np.isfinite(delta_deg) or delta_deg == 0:
+                raise ValueError("DELTA_DEG must be finite and nonzero")
+            # Actual current configuration, not q_home. Preview + revalidation
+            # prevents unintended incremental moves after mode changes.
+            q = ctx.robot.get_q()
+            target = q.copy()
+            target[int(joint[1])] += np.deg2rad(delta_deg)
+            request_move(ctx, target, label=f"jog {joint} {delta_deg:g} deg")
+        elif len(args) == 9 and args[1] == "goto" and args[2] in ("deg", "rad"):
+            q = np.asarray([float(x) for x in args[3:]], dtype=float)
+            target = np.deg2rad(q) if args[2] == "deg" else q
+            request_move(ctx, target, label="goto " + args[2])
         elif args[1:] == ["connect", "home"]:
             ans = input("Homing WILL MOVE the robot. Cage clear, permitted to operate? Type HOME: ")
             if ans == "HOME":
@@ -162,7 +206,6 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
                 print("Joint positions / flange pose are not reliable. Re-enable station and reconnect before reading.")
                 return True
             q = ctx.robot.get_q()
-            import numpy as np
             print("mode:", ctx.robot.mode)
             print("q [rad]:", np.array2string(q, precision=4))
             print("T_base_flange:\n", ctx.robot.flange_pose())
@@ -180,7 +223,7 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
                 else:
                     print("Cancelled.")
         else:
-            print("Try: robot connect virtual|home|nohome, robot virtual-set deg|rad Q0..Q5, robot status|soft-home|release|disconnect")
+            print("Try: robot jog q0 2 | robot goto deg Q0..Q5 | robot status | robot release | robot soft-home")
     elif command == "camera":
         if args[1:] == ["open"]:
             if ctx.robot.mode == "virtual":
@@ -223,7 +266,7 @@ Extensions included: diagnostics, camera_intrinsics, eye_to_hand, prokop_visuali
 def main() -> None:
     ctx = Context(
         root=ROOT,
-        robot=RobotManager(SETTINGS["robot"]["tty_dev"]),
+        robot=RobotManager(SETTINGS["robot"]["tty_dev"], **SETTINGS.get("motion", {})),
         camera=CameraManager(SETTINGS["camera"]["name"]),
         calibration=CalibrationStore(ROOT / "data" / "calibration"),
     )
