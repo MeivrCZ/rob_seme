@@ -107,8 +107,16 @@ class HoopAutoScanner:
         self.robot.set_table_z(table_z)
         self.robot.set_hoop_offset(offset)
         self.robot.check_table_clearance(start_q)
-        # Fix the tool orientation at current pose, to keep hoop shape consistent.
-        R = self._fk(start_q)[:3, :3].copy()
+        # The hoop lies in the flange XY plane for the nominal Prokop mount:
+        # adapter_to_hoop maps its ring normal to flange -Z.  A BASE-frame
+        # flange orientation with local Z downward therefore puts the ring
+        # HORIZONTAL (the Basler sees a circle, not a ring edge-on).
+        # Local flange +X points back toward the robot, improving reach near
+        # the front edge of the calibrated workspace.  Do NOT inherit the
+        # home orientation: home aims flange +X downward and causes both
+        # unreachable targets and a near-edge-on view of the hoop.
+        # The actual physical mounting must be checked before any REAL run.
+        R = np.diag([-1.0, 1.0, -1.0])
         z_target = table_z + height_cm / 100.0
         points: list[ScanPoint] = []
         segments: list[np.ndarray] = []
@@ -141,7 +149,12 @@ class HoopAutoScanner:
                         continue
                     valid.append(q)
                 if not valid:
-                    raise ValueError(f"IK/limity: nedostupny bod stred hoopu X={x:.3f}, Y={y:.3f}, Z={z_target:.3f} m. ")
+                    raise ValueError(
+                        f"IK/limity: nedostupny bod stred hoopu X={x:.3f}, "
+                        f"Y={y:.3f}, Z={z_target:.3f} m pri vodorovnem hoopu. "
+                        "PLAN nicim nepohnul. Zmensi rozsah mrizky; "
+                        "zachovej skutecne zmerenou vysku stolu a offset."
+                    )
                 target = min(valid, key=lambda q: np.linalg.norm(q - previous))
                 steps = max(1, int(math.ceil(np.max(np.abs(target - previous)) / step_limit)))
                 # Every intermediate joint-space pose is FK checked. This is NOT

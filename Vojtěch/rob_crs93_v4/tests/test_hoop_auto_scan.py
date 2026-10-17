@@ -24,6 +24,7 @@ class FakeRobot:
     def require(self): return self
     def fk(self, q):
         T = np.eye(4)
+        T[:3, :3] = np.diag([-1.,1.,-1.])
         T[:3, 3] = np.asarray(q[:3], float)
         return T
     def ik(self, pose):
@@ -35,7 +36,8 @@ class FakeRobot:
     def set_hoop_offset(self, val):
         self._hoop_offset_tcp = tuple(val)
     def check_table_clearance(self, q):
-        return self.fk(q)[:3, 3] + np.array([.135,0,0])
+        T = self.fk(q)
+        return T[:3, 3] + T[:3, :3] @ np.array([.135,0,0])
     def preview_move(self, q):
         return self.q.copy(), np.array(q, float)
     def move_to_q(self, q, *, expected_q=None):
@@ -60,7 +62,7 @@ def test_complete_auto_scan_and_solve(tmp_path):
     assert robot.moves == []  # PREVIEW must not move hardware.
     def simulated_detection(frame):
         T = robot.fk(robot.get_q())
-        x,y,_ = T[:3,3] + np.array([.135,0,0])
+        x,y,_ = T[:3,3] + T[:3,:3] @ np.array([.135,0,0])
         return 800 + 1400*x, 600 + 1400*y
     with patch('hoop_auto_scan.detect_single_circle', side_effect=simulated_detection):
         assert scanner.run() == 25

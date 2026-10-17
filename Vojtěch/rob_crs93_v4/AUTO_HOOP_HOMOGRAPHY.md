@@ -96,6 +96,33 @@ Před novým startem `homo clear` a znovu `homo scan plan ...`.
 8. Zkontroluj `homo status` a přesnost v **nezávislých** měřených bodech;
    pouhá RMS chyba z kalibračních bodů nestačí.
 
+## Oprava planovani z home (2026-10-17)
+
+Puvodni `hoop_auto_scan.py` drzel orientaci priruby z okamziku planovani.
+Z `home` to pri nominalnim namontovani hoopu znamena prakticky svisly
+krouzek a caste chyby `IK/limity`. Aktualni verze nastavuje vodorovnou
+rovinu hoopu podle nominalniho Prokopova adapteru (normal krouzku miri
+svisle nahoru, smer od priruby ke stredu krouzku vede smerem k zakladne).
+
+Pro staticke overeni mřížky v modelu se osvedcil **jen navrh k PLAN**:
+
+```text
+homo scan plan 0.28 0.43 -0.17 0.17 -0.0248 10 5 5
+homo scan status
+```
+
+Tato cisla NEJSOU overene fyzicke souradnice. `TABLE_Z=-0.0248 m`
+pochazi z neovereneho placeholderu v Prokop/placement.py. Pred prikazem
+`homo scan run` zmer presnou vysku desky stolu v BASE robota, zkontroluj
+skutecnou montaz hoopu, orientaci, volny pohyb celeho ramene a pokryti
+kamerou. Spatne nastaveni vysky stolu nebo montaze invaliduje simulovanou
+kontrolu odstupu. Vypocet IK na modelu nezarucuje dosazitelnost realneho
+hardware ani bezkoliznost stanice.
+
+Pro danou pevnou orientaci krouzku muze byt rozsah uzsi nez cele pole
+kamery; body mimo zmerenou oblast vyzaduji dalsi overeni presnosti nebo
+dalsi kalibracni postup s jinou orientaci a vice referencnimi body.
+
 ## Omezení
 
 Homografie platí **jen pro jednu kalibrovanou rovinu Z středu hoopu**.
