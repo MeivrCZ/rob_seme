@@ -11,8 +11,7 @@ Rules (assignment + team decisions):
     intersection of the base footprint (125 x 125 mm square) and the turntable top
     disc (both convex, so the intersection is convex), with STABILITY_MARGIN.
 
-All frames are in the ctu_crs robot base frame (m). Placeholders (not measured yet):
-TABLE_Z, CAGE_XY and the turntable dimensions in turntable.urdf.
+All frames are in the ctu_crs robot base frame (m).
 """
 
 from __future__ import annotations
@@ -23,18 +22,30 @@ from pathlib import Path
 import numpy as np
 import trimesh
 import yourdfpy
-from ctu_crs import CRS97
+from ctu_crs import CRS93
 
-HERE = Path(__file__).resolve().parent
+MODELS = Path(__file__).resolve().parent / "models"  # URDFs and their meshes
 
-# PLACEHOLDER: table surface; assumed = the robot's mounting plane (bottom of the
-# RoboDK base, 24.8 mm below the ctu base frame).
-TABLE_Z = -0.0248
-# PLACEHOLDER: region of the table where the turntable centre may be (the cage).
+# Table surface. The robot's round base (RoboDK mesh bottom, 24.8 mm below the
+# ctu base frame) stands on a square steel plate whose top is 31 mm (+-2 mm,
+# measured with a tape) above the table.
+TABLE_Z = -0.0248 - 0.031
+# Front of the robot's round base (x max of the base mesh).
+ROBOT_FRONT_X = 0.099
+# PLACEHOLDER, to be measured: the cage, i.e. where on the table the turntable
+# centre may be at all [[x_min, x_max], [y_min, y_max]]. Random placement uses it.
 CAGE_XY = np.array([[-0.8, 0.8], [-0.8, 0.8]])
+# Work area on the table [[x_min, x_max], [y_min, y_max]]: the part the camera sees,
+# 30 cm deep, 48 cm wide, centred on the robot, starting 22.2 cm in front of the
+# robot's front face. The viable placement puts the turntable centre in it
+# (random_placement(rng, WORK_AREA_XY)).
+WORK_AREA_XY = np.array([[ROBOT_FRONT_X + 0.222, ROBOT_FRONT_X + 0.222 + 0.30],
+                         [-0.24, 0.24]])
 MIN_CLEARANCE = 0.01  # m, to the robot in q_home
 STABILITY_MARGIN = 0.005  # m, centre of mass from the edge of the support region
 BASE_HALF = 0.0625  # m, half side of the base plate footprint
+BASE_FOAM = 0.025  # m, foam pad under the base plate (part of base.urdf)
+FOAM_DENSITY = 30.0  # kg/m^3, ASSUMED (PU foam)
 # Mass model for the centre of mass: printed parts are PETG (1.27 g/cm^3) with
 # 3 perimeters + 10-20 % infill -> ASSUMED effective fill 0.5; magnets in base and
 # puzzle foot: 3 + 3 neodymium discs 10 x 3 mm (7.5 g/cm^3) under the groove.
@@ -82,26 +93,26 @@ class Placement:
         return yaw_matrix(*self.turntable_xy, TABLE_Z, 0.0)
 
     def base_T_top(self) -> np.ndarray:
-        """Pose of the base in the turntable 'top' frame."""
-        return yaw_matrix(*self.base_xy, 0.0, self.base_yaw)
+        """Pose of the base in the turntable 'top' frame (standing on its foam)."""
+        return yaw_matrix(*self.base_xy, BASE_FOAM, self.base_yaw)
 
 
 class TaskScene:
     """Static models of the task and the robot in q_home, for placement checks."""
 
     def __init__(self) -> None:
-        self.turntable = load_urdf(HERE / "turntable.urdf")
-        self.base = load_urdf(HERE / "base.urdf")
-        self.puzzle = load_urdf(HERE / f"{TASK_PUZZLE}.urdf")
+        self.turntable = load_urdf(MODELS / "turntable.urdf")
+        self.base = load_urdf(MODELS / "base.urdf")
+        self.puzzle = load_urdf(MODELS / f"{TASK_PUZZLE}.urdf")
         self.T_top = self.turntable.get_transform("top", self.turntable.base_link)
         self.T_mount = self.base.get_transform("puzzle_mount", self.base.base_link)
         cyl = self.turntable.link_map["turntable_link"].collisions[0].geometry.cylinder
         self.turntable_radius = cyl.radius
         self.com_xy = self._com_xy()
 
-        robot = load_urdf(HERE / "crs97.urdf")
-        robot.update_cfg(CRS97(tty_dev=None).q_home)
-        hoop = load_urdf(HERE / "hoop.urdf")
+        robot = load_urdf(MODELS / "crs93.urdf")
+        robot.update_cfg(CRS93(tty_dev=None).q_home)
+        hoop = load_urdf(MODELS / "hoop.urdf")
         T_hoop = robot.get_transform("adapter_front", robot.base_link) @ HOOP_MOUNT
         self.robot_home = trimesh.collision.CollisionManager()
         for i, m in enumerate(collision_meshes(robot) + collision_meshes(hoop, T_hoop)):
@@ -113,7 +124,8 @@ class TaskScene:
         parts += [(m, self.T_mount) for m in collision_meshes(self.puzzle)]
         masses, coms = [], []
         for m, T in parts:
-            masses.append(PRINT_DENSITY * m.volume)
+            foam = m.bounds[1, 2] <= 1e-9  # the only part below the base plate
+            masses.append((FOAM_DENSITY if foam else PRINT_DENSITY) * m.volume)
             coms.append(trimesh.transform_points([m.center_mass], T)[0, :2])
         masses += [2 * MAGNET_MASS] * len(MAGNETS_XY)  # base + puzzle magnet pairs
         coms += list(MAGNETS_XY)
@@ -173,14 +185,16 @@ class TaskScene:
         task.add_object("swept", self.swept_task_mesh(p))
         return max(0.0, self.robot_home.min_distance_other(task))
 
-    def random_placement(self, rng: np.random.Generator,
+    def random_placement(self, rng: np.random.Generator, area: np.ndarray = CAGE_XY,
                          max_tries: int = 1000) -> Placement:
-        """Uniformly random placement satisfying the rules in the module doc."""
+        """Uniformly random placement satisfying the rules in the module doc, with
+        the turntable centre in @area [[x_min, x_max], [y_min, y_max]]: the cage
+        by default, WORK_AREA_XY for a placement the camera sees."""
         # Base centre within the disc where any part of the base can still touch it.
         reach = self.turntable_radius + BASE_HALF * np.sqrt(2)
         for _ in range(max_tries):
             r, phi = reach * np.sqrt(rng.uniform()), rng.uniform(0, 2 * np.pi)
-            p = Placement(rng.uniform(CAGE_XY[:, 0], CAGE_XY[:, 1]),
+            p = Placement(rng.uniform(area[:, 0], area[:, 1]),
                           r * np.array([np.cos(phi), np.sin(phi)]),
                           rng.uniform(0, 2 * np.pi))
             if (self.stability_margin(p) >= STABILITY_MARGIN

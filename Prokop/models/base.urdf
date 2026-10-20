@@ -5,6 +5,7 @@
 <robot name="base">
   <material name="base_white"><color rgba="0.95 0.95 0.95 1.0"/></material>
   <material name="base_black"><color rgba="0.03 0.03 0.03 1.0"/></material>
+  <material name="foam_yellow"><color rgba="0.90 0.80 0.45 1.0"/></material>
   <link name="base_link">
     <!-- white plate + black ArUco relief (split by step2stl.py); collision = whole base -->
     <visual>
@@ -24,6 +25,24 @@
       <inertia ixx="1.2716e-04" ixy="2.5796e-06" ixz="1.8244e-09" iyy="1.2692e-04" iyz="-1.3724e-08" izz="2.5366e-04"/>
     </inertial>
   </link>
+
+  <!-- foam pad under the base (measured: base + foam 30 mm high, foam has the
+       base footprint); the assembly stands on the foam bottom, z = -25 mm -->
+  <link name="foam">
+    <visual>
+      <origin xyz="0 0 -0.0125"/>
+      <geometry><box size="0.125 0.125 0.025"/></geometry>
+      <material name="foam_yellow"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.0125"/>
+      <geometry><box size="0.125 0.125 0.025"/></geometry>
+    </collision>
+  </link>
+  <joint name="base_link_to_foam" type="fixed">
+    <parent link="base_link"/><child link="foam"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
 
   <!-- put any puzzle_X link origin here: its triangular foot (z -2.5..0) drops into the groove, groove floor at z=2.5 -->
   <link name="puzzle_mount"/>

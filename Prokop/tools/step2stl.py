@@ -1,7 +1,7 @@
 """Convert the STEP models of the hw repo into the STL meshes used by the URDFs.
 
 Run from the repo root (needs the optional `cad` dependency group):
-    uv run --group cad Prokop/step2stl.py [output_dir]      # default Prokop/meshes
+    uv run --group cad Prokop/tools/step2stl.py [output_dir]   # default Prokop/models/meshes
 
 Meshes keep the STEP-file origin and units (mm); the URDFs scale them by 0.001.
 The base is additionally split into base_plate.stl + base_markers.stl and the hoop
@@ -19,8 +19,8 @@ from OCP.GProp import GProp_GProps
 from OCP.StlAPI import StlAPI_Writer
 from OCP.STEPControl import STEPControl_Reader
 
-HERE = Path(__file__).resolve().parent
-HW = HERE.parent / "ROB1-2025-hw-main"
+PROKOP = Path(__file__).resolve().parent.parent
+HW = PROKOP.parent / "ROB1-2025-hw-main"
 
 # STEP file (relative to the hw repo) -> mesh name
 SOURCES = {
@@ -67,19 +67,28 @@ def split_hoop_colours(hoop: Path) -> None:
     is printed flat (STEP z = -6.6 .. 0 mm) with filament changes at 0.8 mm and
     5.8 mm (see print_files/hoop_dualcolor_*.gcode, the slicer marks the middle part
     #4835C7): the 0.8 mm layers on both faces are white, the core is blue (matches
-    the photo of the setup). The two closed magnet cavities are dropped."""
+    the photo of the setup). Faces lying in a filament-change plane (the floors of
+    the 0.8 mm deep ring groove and triangle recess on both faces) are surfaces of
+    the core, so blue. The two closed magnet cavities are dropped."""
     body = max(trimesh.load(hoop).split(only_watertight=False),
                key=lambda b: len(b.faces))
     slice_ = trimesh.intersections.slice_mesh_plane
     top = slice_(body, [0, 0, 1], [0, 0, -0.8])
     bottom = slice_(body, [0, 0, -1], [0, 0, -5.8])
     core = slice_(slice_(body, [0, 0, -1], [0, 0, -0.8]), [0, 0, 1], [0, 0, -5.8])
-    trimesh.util.concatenate([top, bottom]).export(hoop.with_name("hoop_white.stl"))
-    core.export(hoop.with_name("hoop_blue.stl"))
+    white = trimesh.util.concatenate([top, bottom])
+    z = white.vertices[white.faces][:, :, 2]  # (faces, 3) vertex heights
+    in_plane = np.any([np.all(np.abs(z - h) < 1e-6, axis=1) for h in (-0.8, -5.8)],
+                      axis=0)
+    white.submesh([np.flatnonzero(~in_plane)], append=True).export(
+        hoop.with_name("hoop_white.stl"))
+    trimesh.util.concatenate([core, white.submesh([np.flatnonzero(in_plane)],
+                                                  append=True)]).export(
+        hoop.with_name("hoop_blue.stl"))
 
 
 if __name__ == "__main__":
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "meshes"
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else PROKOP / "models" / "meshes"
     out.mkdir(parents=True, exist_ok=True)
     for rel, name in SOURCES.items():
         dst = out / f"{name}.stl"

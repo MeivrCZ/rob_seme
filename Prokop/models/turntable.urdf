@@ -1,23 +1,23 @@
 <?xml version="1.0"?>
-<!-- PLACEHOLDER turntable: flat cylinder, dimensions guessed from the assignment
-     photos (not measured). Origin = centre of its bottom face, standing on the table;
+<!-- turntable: cylinder, diameter 137 mm, height 34 mm (measured; the housing is
+     modelled as one cylinder). Origin = centre of its bottom face, standing on the table;
      "top" = centre of the top face, where the base plate is put. -->
 <robot name="turntable">
   <material name="turntable_white"><color rgba="0.88 0.88 0.86 1.0"/></material>
   <link name="turntable_link">
     <visual>
-      <origin xyz="0 0 0.0225"/>
-      <geometry><cylinder radius="0.08" length="0.045"/></geometry>
+      <origin xyz="0 0 0.017"/>
+      <geometry><cylinder radius="0.0685" length="0.034"/></geometry>
       <material name="turntable_white"/>
     </visual>
     <collision>
-      <origin xyz="0 0 0.0225"/>
-      <geometry><cylinder radius="0.08" length="0.045"/></geometry>
+      <origin xyz="0 0 0.017"/>
+      <geometry><cylinder radius="0.0685" length="0.034"/></geometry>
     </collision>
   </link>
   <link name="top"/>
   <joint name="turntable_link_to_top" type="fixed">
     <parent link="turntable_link"/><child link="top"/>
-    <origin xyz="0 0 0.045"/>
+    <origin xyz="0 0 0.034"/>
   </joint>
 </robot>
