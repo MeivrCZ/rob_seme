@@ -1,0 +1,16 @@
+{
+  "started": "2026-10-21T13:04:00",
+  "timing": {
+    "width": 1920,
+    "height": 1200,
+    "channels": 3,
+    "first_grab_s": 0.7766892370000278,
+    "grab_s_median": 0.1862329610003144,
+    "grab_s_max": 0.18722320300003048
+  },
+  "delay": {
+    "delay_s": 0.0,
+    "mismatch": Infinity,
+    "mismatch_at_0": Infinity
+  }
+}
