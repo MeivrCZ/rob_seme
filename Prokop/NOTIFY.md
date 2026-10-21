@@ -11,6 +11,11 @@ are rewriting it anyway, here is what changed:
   flange equals `ctu_crs` `fk(q)` exactly. The offset rotated the drawn hoop
   by 180 deg (pointing up), away from the FK. `tests/test_homography.py` checks
   for the removed code.
+- **Hoop up in q_home (2026-10-21).** On the CRS93 station the adapter is
+  screwed on turned by 180 deg, so the hoop points up in q_home: that is what
+  your joint-6 view offset compensated. It is now in the robot model itself
+  (`models/crs93.urdf`, `ADAPTER_TURN` in `tools/robodk2urdf.py`); `fk(q)` is
+  still the real flange, so no joint offset is needed anywhere.
 - **Files moved.** URDFs and meshes are now in `Prokop/models/`, generators in
   `Prokop/tools/`. Code that loads `Prokop/*.urdf` (e.g. `app/robot.py`,
   `tests/test_table_guard_and_scan.py`) needs the new path; `placement.MODELS`

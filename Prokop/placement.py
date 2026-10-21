@@ -22,25 +22,14 @@ from pathlib import Path
 import numpy as np
 import trimesh
 import yourdfpy
+from cell import CAGE_XY, TABLE_Z, WORK_AREA_XY, in_cage  # noqa: F401 (re-exported)
 from ctu_crs import CRS93
 
 MODELS = Path(__file__).resolve().parent / "models"  # URDFs and their meshes
 
-# Table surface. The robot's round base (RoboDK mesh bottom, 24.8 mm below the
-# ctu base frame) stands on a square steel plate whose top is 31 mm (+-2 mm,
-# measured with a tape) above the table.
-TABLE_Z = -0.0248 - 0.031
-# Front of the robot's round base (x max of the base mesh).
-ROBOT_FRONT_X = 0.099
-# PLACEHOLDER, to be measured: the cage, i.e. where on the table the turntable
-# centre may be at all [[x_min, x_max], [y_min, y_max]]. Random placement uses it.
-CAGE_XY = np.array([[-0.8, 0.8], [-0.8, 0.8]])
-# Work area on the table [[x_min, x_max], [y_min, y_max]]: the part the camera sees,
-# 30 cm deep, 48 cm wide, centred on the robot, starting 22.2 cm in front of the
-# robot's front face. The viable placement puts the turntable centre in it
-# (random_placement(rng, WORK_AREA_XY)).
-WORK_AREA_XY = np.array([[ROBOT_FRONT_X + 0.222, ROBOT_FRONT_X + 0.222 + 0.30],
-                         [-0.24, 0.24]])
+# Table, cage and work area (the part the camera sees): see cell.py. Random
+# placement puts the turntable inside the cage, the viable placement in the work
+# area (random_placement(rng, WORK_AREA_XY)).
 MIN_CLEARANCE = 0.01  # m, to the robot in q_home
 STABILITY_MARGIN = 0.005  # m, centre of mass from the edge of the support region
 BASE_HALF = 0.0625  # m, half side of the base plate footprint
@@ -189,7 +178,8 @@ class TaskScene:
                          max_tries: int = 1000) -> Placement:
         """Uniformly random placement satisfying the rules in the module doc, with
         the turntable centre in @area [[x_min, x_max], [y_min, y_max]]: the cage
-        by default, WORK_AREA_XY for a placement the camera sees."""
+        by default, WORK_AREA_XY for a placement the camera sees; the whole
+        turntable stays inside the cage walls in any case."""
         # Base centre within the disc where any part of the base can still touch it.
         reach = self.turntable_radius + BASE_HALF * np.sqrt(2)
         for _ in range(max_tries):
@@ -197,7 +187,8 @@ class TaskScene:
             p = Placement(rng.uniform(area[:, 0], area[:, 1]),
                           r * np.array([np.cos(phi), np.sin(phi)]),
                           rng.uniform(0, 2 * np.pi))
-            if (self.stability_margin(p) >= STABILITY_MARGIN
+            if (in_cage(p.turntable_xy, self.turntable_radius)
+                    and self.stability_margin(p) >= STABILITY_MARGIN
                     and self.clearance_to_robot(p) >= MIN_CLEARANCE):
                 return p
         raise RuntimeError(f"no valid placement found in {max_tries} tries")

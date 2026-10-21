@@ -65,12 +65,13 @@ def test_adapter_mesh_has_no_open_edges(crs93):
     assert np.all(counts >= 2)
 
 
-def test_adapter_points_down_in_home(crs93, robot):
-    """Triangle vertex of the adapter (-y) points down in q_home, its front (-z)
-    along the flange z axis."""
+def test_adapter_points_up_in_home(crs93, robot):
+    """Triangle vertex of the adapter (-y), and with it the hoop, points up in
+    q_home (the adapter is turned by 180 deg on the CRS93 station), its front
+    (-z) along the flange z axis."""
     crs93.update_cfg(robot.q_home)
     T = crs93.get_transform("adapter_front", crs93.base_link)
-    assert np.allclose(-T[:3, 1], [0, 0, -1], atol=1e-9)
+    assert np.allclose(-T[:3, 1], [0, 0, 1], atol=1e-9)
     assert np.allclose(-T[:3, 2], robot.fk(robot.q_home)[:3, 2], atol=1e-9)
 
 

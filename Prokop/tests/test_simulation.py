@@ -79,6 +79,17 @@ def test_move_before_initialize():
         s.viewer.server.stop()
 
 
+def test_hard_home_ends_at_measured_pose():
+    """Hard home ends where the real CRS93 did (2026-10-21), in degrees."""
+    s = make_sim()
+    try:
+        s.hard_home()
+        assert np.allclose(np.rad2deg(s.get_q()),
+                           [163.4, 0.3, -56.0, 176.7, 14.9, -172.0], atol=0.15)
+    finally:
+        s.viewer.server.stop()
+
+
 def test_initialize_homes_to_q_home():
     s = make_sim(q0=np.zeros(6))
     try:

@@ -30,18 +30,22 @@ docstring.
 | --- | --- |
 | `simulation.py` | `CRS93Sim`, the simulated robot |
 | `view_models.py` | `SceneViewer` (the Viser task scene) and the interactive viewer |
+| `cell.py` | the static work cell: table, work area, cage, camera rail, camera |
+| `collision.py` | clearance of the arm + hoop to the table and the cell (pose, joint path) |
 | `placement.py` | random turntable / base placement with tip-over and clearance checks |
 | `demo_sim.py` | smoke test of the simulation |
 | `models/` | URDFs and STL meshes (robot, adapter, hoop, base, puzzles, turntable) |
 | `tools/` | model generators: `robodk2urdf.py` (robot URDF), `step2stl.py` (meshes); measurements on the real robot: `log_motion.py` (motion logs, real or sim), `camera_survey.py` (camera timing and image delay) |
 | `ROBOT_CHECKS.md` | what to measure on the real robot to calibrate the simulation |
 
-Measured: `TABLE_Z`, `WORK_AREA_XY` (area seen by the camera, used by the viable
-placement), `BASE_FOAM` (placement.py), turntable size.
-Placeholders still to be replaced by measurements: `CAGE_XY` (placement.py, where
-the random placement puts the turntable), the robot's steel base plate and the
-cage walls (not modelled yet), `SPIN_PERIOD` (view_models.py), motion profile
-units (simulation.py).
+Measured: table height, work area, cage, camera rail and camera position
+(`cell.py`), `BASE_FOAM` (placement.py), turntable size. Placeholders still to be
+replaced by measurements: camera intrinsics (`cell.py`, focal length estimated
+from the work area), motion profile units (simulation.py). Turntable period `SPIN_PERIOD` = 28.0 s
+(view_models.py), measured, the same both ways.
+Seen on the robot: the adapter is turned by 180 deg, the hoop points up in
+q_home (`ADAPTER_TURN`, tools/robodk2urdf.py); the hard home ends where the
+control unit zeroes the encoders (simulation.py).
 Decided, not measured: `HOOP_MOUNT` (placement.py) stays the nominal CAD seating
 (triangle in triangle); the hoop can sit slightly off on its magnets, which the
 team accepts and ignores unless it proves to be a problem.

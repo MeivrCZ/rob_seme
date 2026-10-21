@@ -4,12 +4,15 @@ simulation, to measure the real motion profile (see Prokop/ROBOT_CHECKS.md).
 Run from the repo root:
     uv run Prokop/tools/log_motion.py                 # simulation
     uv run Prokop/tools/log_motion.py --real          # real CRS93
+    uv run Prokop/tools/log_motion.py --real --tests j1_j4_corner j1_reverse
 
 The real robot is NOT homed by this script (homing has no collision checking and
 can wreck the arm from a bad pose): home it yourself first and leave it in q_home.
 
 Every test starts and ends in q_home and keeps the arm up (joints 1, 4, 6 only,
-max 30 deg on joint 1). Writes one CSV per test (t [s], q1..q6 [rad]) to
+max 30 deg on joint 1). The queued tests send several moves without waiting:
+how the control unit blends them (same direction, corner, reversal, a dense
+chain of via points like a planned path). Writes one CSV per test (t [s], q1..q6 [rad]) to
 Prokop/motion_logs/<real|sim>/ and prints the duration, peak joint speeds and
 the delays for CRS93Sim: start latency (move_to_q until the joints move, i.e.
 command_delay + query_delay / 2, +- half a sampling period, slightly more
@@ -39,6 +42,11 @@ TESTS = {
     "j6_90_speed050": (0.5, [[0, 0, 0, 0, 0, 90]]),
     "j1_queued_15_15": (0.5, [[15, 0, 0, 0, 0, 0], [30, 0, 0, 0, 0, 0]]),
     "j1_30_j4_60_coord": (0.5, [[30, 0, 0, 60, 0, 0]]),
+    "j1_j4_corner": (0.5, [[20, 0, 0, 0, 0, 0], [20, 0, 0, 40, 0, 0]]),
+    "j1_reverse": (0.5, [[20, 0, 0, 0, 0, 0], [5, 0, 0, 0, 0, 0]]),
+    "j1_vias_10x3": (0.5, [[3 * (i + 1), 0, 0, 0, 0, 0] for i in range(10)]),
+    "j1_j4_arc_vias": (0.5, [[30 * np.sin(a), 0, 0, 60 * (1 - np.cos(a)), 0, 0]
+                             for a in np.linspace(0, np.pi / 2, 10)[1:]]),
 }
 
 
@@ -105,6 +113,8 @@ def main() -> None:
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--real", action="store_true",
                         help="use the real CRS93 (already homed, standing in q_home)")
+    parser.add_argument("--tests", nargs="+", choices=list(TESTS), default=list(TESTS),
+                        help="run only these tests (default: all)")
     args = parser.parse_args()
 
     if args.real:
@@ -122,7 +132,8 @@ def main() -> None:
                          f"{np.rad2deg(robot.get_q()).round(1)}); move it there first")
     input("Robot in q_home: runs the tests (joints 1, 4, 6 only). Enter to start ")
 
-    for name, (speed, offsets) in TESTS.items():
+    for name in args.tests:
+        speed, offsets = TESTS[name]
         save_test(out, name, run_test(robot, speed, offsets))
     robot.close()
     print("CSV logs in", out)

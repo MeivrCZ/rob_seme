@@ -10,9 +10,8 @@ it on the real robot.
 
 import numpy as np
 from simulation import CRS93Sim
-from ctu_crs import CRS93
 
-robot = CRS93()  # from ctu_crs import CRS93; robot = CRS93()
+robot = CRS93Sim()  # from ctu_crs import CRS93; robot = CRS93()
 input("Open the viewer, then press Enter to start ")
 
 robot.initialize()  # hard home (q = 0 joint group by group), then q_home

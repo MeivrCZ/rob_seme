@@ -16,11 +16,13 @@ MARS control unit are replaced:
   - get_q / in_motion / wait_for_motion_stop follow the queued motion in real
     time (time_scale > 1 runs faster), with targets rounded to IRC like the real
     commands,
-  - initialize(home=True) moves to q = 0 joint group by joint group in the
-    hard home sequence, then to q_home (soft home, as on the real robot).
-    PLACEHOLDER: the real hard home drives to the home switches, which are not
-    at q = 0 (see ROBOT_CHECKS.md); there is no collision checking, so do not
-    rely on the sim to judge whether a pose is safe to home from,
+  - initialize(home=True) moves joint group by joint group in the hard home
+    sequence to the hard home pose, where the control unit zeroes the encoders
+    (IRC 0, ~(163.5, 0.3, -56.0, 176.8, 14.9, -172.0) deg; confirmed on the
+    robot 2026-10-21), then to q_home (soft home). The real joints first drive to
+    their home switches, on paths the sim does not know; there is no collision
+    checking, so do not rely on the sim to judge whether a pose is safe to home
+    from,
   - set_speed / set_acceleration (and the *_relative variants) set the motion
     profile in the same units as on the real robot,
   - the gripper is a stub, grab_image is not simulated (no camera model yet),
@@ -267,9 +269,11 @@ class CRS93Sim(CRS93):
         if len(self._hh_sequence) == 0:
             raise ValueError("The hard home sequence is not defined for this robot.")
         q = self._q_at(self._now())
+        q_hh = self._irc_to_joint_values(np.zeros(len(self._motors_ids)))
         for blk in self._hh_sequence:
             for a in blk:
-                q[self._motors_ids.index(a)] = 0.0
+                i = self._motors_ids.index(a)
+                q[i] = q_hh[i]
             self._enqueue(q)
             self.wait_for_motion_stop()
 

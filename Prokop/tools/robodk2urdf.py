@@ -46,10 +46,14 @@ MESH_DIR = MODELS / "meshes" / "crs93"
 
 # CRS adapter (meshes/crs_adapter.stl, STEP frame, mm). Its +z face (z = +2 mm) is
 # screwed to the flange, its front face (z = -8 mm) carries the triangular hole whose
-# vertex points to -y (between two screws) and must point down in q_home, where the
-# flange x axis points down. Hence, in the flange frame: adapter z = -flange z,
-# adapter -y = flange x.
-ADAPTER_R = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+# vertex points to -y (between two screws). In q_home the flange x axis points
+# down. Turned by ADAPTER_TURN = 0 the vertex would point down: adapter z = -flange
+# z, adapter -y = flange x. The 4 screws allow turns by multiples of 90 deg about
+# the flange z axis; on the CRS93 station it is turned by 180 deg: the vertex, and
+# with it the hoop, points UP in q_home (seen on the robot 2026-10-21).
+ADAPTER_TURN = np.pi
+ADAPTER_R = (trimesh.transformations.rotation_matrix(ADAPTER_TURN, [0, 0, 1])[:3, :3]
+             @ np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]]))
 ADAPTER_T = np.array([0.0, 0.0, 0.002])
 ADAPTER_FRONT_Z = -0.008  # front face in the adapter frame; the hoop seats here
 
@@ -277,14 +281,14 @@ def verify(robot: CRS93) -> None:
     print(f"max |URDF flange - ctu fk| over 200 random q: {err:.2e}")
     assert err < 1e-9
 
-    # In q_home the adapter's triangle vertex (-y) must point down, its front (-z)
-    # away from the flange.
+    # In q_home the adapter's triangle vertex (-y) must point up (ADAPTER_TURN = pi),
+    # its front (-z) away from the flange.
     urdf.update_cfg(robot.q_home)
     T = urdf.get_transform("adapter_front", "base_link")
     F = robot.fk(robot.q_home)
     print("q_home: triangle vertex dir", (-T[:3, 1]).round(6),
           "front dir", (-T[:3, 2]).round(6))
-    assert np.allclose(-T[:3, 1], [0, 0, -1])
+    assert np.allclose(-T[:3, 1], [0, 0, -np.cos(ADAPTER_TURN)])
     assert np.allclose(-T[:3, 2], F[:3, 2])
     assert np.allclose(T[:3, 3], F[:3, 3] + 0.010 * F[:3, 2])
 
