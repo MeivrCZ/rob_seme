@@ -20,8 +20,10 @@ robot = CRS93Sim()                  # robot = CRS93()
 ```
 
 Extra keyword arguments (simulation only): `q0`, `port`, `time_scale`,
-`keep_alive` and the hardware delays `command_delay`, `query_delay`,
-`status_delay`, `camera_delay` (defaults measured on the CRS93; 0 = ideal). What is and is not simulated is listed in the `simulation.py`
+`keep_alive` and the hardware delays `command_delay`, `send_delay`,
+`query_delay`, `status_delay`, `camera_delay` (defaults measured on the CRS93;
+0 = ideal). Queued moves blend only when they continue in the same joint-space
+direction, as on the real robot. What is and is not simulated is listed in the `simulation.py`
 docstring.
 
 ## Layout

@@ -9,10 +9,14 @@
 then open http://localhost:8080. CRS93Sim subclasses CRS93, so kinematics, limits,
 q_home, DH parameters etc. are the real ones; only the methods that talk to the
 MARS control unit are replaced:
-  - move_to_q returns at once and queues a coordinated movement like COORDMV:
-    all joints start and stop together; queued moves run one after another,
-    each from standstill (the real unit may blend them, see ASSUMED below); the
-    queue is unlimited (the real one blocks move_to_q when full),
+  - move_to_q queues a coordinated movement like COORDMV (blocking for
+    send_delay, the serial write): all joints start and stop together. Queued
+    moves run one after another; a move continuing in exactly the same
+    joint-space direction is blended into the previous one (no stop, as one
+    longer move), any other one starts from standstill: the real unit stops at
+    corners and reversals and nearly stops at the vias of a bending path
+    (measured 2026-10-21). The queue is unlimited (the real one blocks move_to_q
+    when full),
   - get_q / in_motion / wait_for_motion_stop follow the queued motion in real
     time (time_scale > 1 runs faster), with targets rounded to IRC like the real
     commands,
@@ -29,8 +33,9 @@ MARS control unit are replaced:
     release / reset_motors / close do nothing.
 Hardware delays (sim seconds; script execution time is real anyway), defaults
 measured on the CRS93 (2026-10-21, tools/log_motion.py), 0 for an ideal robot:
-  - command_delay: from move_to_q until the control unit starts the move (the
-    call itself returns at once, as the serial write does); 0.12 s,
+  - command_delay: from the move_to_q call until the control unit starts the
+    move; 0.12 s,
+  - send_delay: how long move_to_q blocks (writing the command); 0.025 s,
   - query_delay: round trip of the joint position query; get_q blocks for it
     and returns the configuration from its middle; 0.05 s,
   - status_delay: round trip of the status query (ready / in motion); in_motion
@@ -38,8 +43,8 @@ measured on the CRS93 (2026-10-21, tools/log_motion.py), 0 for an ideal robot:
     returns status_delay / 2 after the motion ends (at least status_delay after
     the call); 0.01 s,
   - camera_delay: age of the image when grab_image returns (stored for the
-    simulated camera, not used yet); not measured yet, < GRAB_TIME (the real
-    grab_image takes 186 ms and the image is taken during the call).
+    simulated camera, not used yet); 0.11 s (the real grab_image takes 186 ms,
+    the image is taken during the call).
 One sim clock (time_scale) drives the robot, the delays and the turntable spin;
 the render loop shows the whole scene at one time, atomically.
 When the script ends, queued moves finish and the scene stays open (keep_alive)
@@ -47,10 +52,11 @@ until Ctrl+C. Each CRS93Sim is its own robot and viewer: scripts cannot share
 one (like the real robot's single serial line); another instance needs its own
 port.
 
-ASSUMED, to be measured on the real robot: the speed and acceleration units
-(speed IRC*256/ms as documented in ctu_crs; acceleration taken as IRC*256/ms^2,
-which gives ~0.4 s ramps with the defaults), the trapezoidal velocity profile of
-COORDMV and that consecutive queued moves stop in between.
+Measured on the real robot (2026-10-21): the speed units (IRC*256/ms, as in
+ctu_crs; speeds match within 0.1 deg/s), the trapezoidal profile and the
+blending rule above. ASSUMED: acceleration units IRC*256/ms^2 (matches the real
+ramps only to ~x2, they last 1-2 samples of the logs); the small overshoot
+(~0.3 deg) and settling (~0.25 s) at the end of a real move are not simulated.
 """
 
 from __future__ import annotations
@@ -68,9 +74,12 @@ from view_models import SceneViewer
 RENDER_FPS = 30.0
 # Measured defaults of the hardware delays [s] (see the module doc).
 COMMAND_DELAY = 0.12
+SEND_DELAY = 0.025
 QUERY_DELAY = 0.05
 STATUS_DELAY = 0.01
-CAMERA_DELAY = 0.0  # PLACEHOLDER, to be measured (tools/camera_survey.py --delay)
+CAMERA_DELAY = 0.11
+# Queued moves blend if their joint-space directions differ by less than this.
+BLEND_TOL = 1e-3
 # Real grab_image duration [s] (ctu_crs starts and stops the camera per call), the
 # first call opening the camera; for the simulated camera.
 GRAB_TIME = 0.186
@@ -109,6 +118,12 @@ class Segment:
         return self.q_from + s * (self.q_to - self.q_from)
 
 
+def _same_direction(a: np.ndarray, b: np.ndarray) -> bool:
+    """Whether the joint-space moves @a and @b point the same way (BLEND_TOL)."""
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    return bool(na > 0 and nb > 0 and np.linalg.norm(a / na - b / nb) < BLEND_TOL)
+
+
 class SimGripper:
     """Stub of ctu_crs.gripper.Gripper (no gripper on the hoop task); keeps the
     commanded position only."""
@@ -145,6 +160,7 @@ class CRS93Sim(CRS93):
                  q0: ArrayLike | None = None, port: int = 8080,
                  time_scale: float = 1.0, keep_alive: bool = True,
                  command_delay: float = COMMAND_DELAY,
+                 send_delay: float = SEND_DELAY,
                  query_delay: float = QUERY_DELAY,
                  status_delay: float = STATUS_DELAY,
                  camera_delay: float = CAMERA_DELAY):
@@ -158,6 +174,7 @@ class CRS93Sim(CRS93):
         self._time_scale = time_scale
         self._t_start = time.monotonic()
         self.command_delay = command_delay
+        self.send_delay = send_delay
         self.query_delay = query_delay
         self.status_delay = status_delay
         self.camera_delay = camera_delay
@@ -215,28 +232,39 @@ class CRS93Sim(CRS93):
         return (self._speed * 1000 / 256 / irc_per_rad,
                 self._acceleration * 1e6 / 256 / irc_per_rad)
 
+    def _profile(self, dq: np.ndarray) -> tuple[float, float]:
+        """Duration T and ramp time tau of a coordinated move by @dq: the shortest
+        trapezoidal move of the slowest joint; the other joints are scaled to the
+        same profile."""
+        v_max, a_max = self._joint_limits_rad()
+        d = np.abs(dq)
+        ramp = v_max / a_max
+        T_joint = np.where(d > v_max * ramp, d / v_max + ramp, 2 * np.sqrt(d / a_max))
+        k = int(np.argmax(T_joint))
+        T = float(T_joint[k])
+        return T, min(float(ramp[k]), T / 2)
+
     def _enqueue(self, q: ArrayLike) -> None:
         """Queue a coordinated movement to @q (rounded to IRC like the real
-        command). The duration is the shortest trapezoidal move of the slowest
-        joint; the other joints are scaled to the same profile."""
+        command). Blended into the last queued move if it continues in the same
+        direction and that move is not slowing down yet when the command
+        arrives: the two become one move with the same start (continuous, as the
+        speed-up and cruise phases of both coincide)."""
         q_to = self._irc_to_joint_values(self._joint_values_to_irc(q))
-        v_max, a_max = self._joint_limits_rad()
         now = self._now()
+        arrival = now + self.command_delay
         with self._lock:
             while self._segments and self._segments[0].t_end < now - HISTORY:
                 self._q_rest = self._segments.pop(0).q_to
             last = self._segments[-1] if self._segments else None
             q_from = last.q_to if last else self._q_rest
-            t0 = now + self.command_delay
-            if last:
-                t0 = max(t0, last.t_end)
-            d = np.abs(q_to - q_from)
-            ramp = v_max / a_max
-            T_joint = np.where(d > v_max * ramp, d / v_max + ramp,
-                               2 * np.sqrt(d / a_max))
-            k = int(np.argmax(T_joint))
-            T = float(T_joint[k])
-            tau = min(float(ramp[k]), T / 2)
+            if last and arrival < last.t_end - last.tau and _same_direction(
+                    last.q_to - last.q_from, q_to - q_from):
+                T, tau = self._profile(q_to - last.q_from)
+                self._segments[-1] = Segment(last.t0, T, tau, last.q_from, q_to)
+                return
+            t0 = max(arrival, last.t_end) if last else arrival
+            T, tau = self._profile(q_to - q_from)
             self._segments.append(Segment(t0, T, tau, q_from.copy(), q_to))
 
     def _stop(self) -> None:
@@ -302,6 +330,7 @@ class CRS93Sim(CRS93):
         assert self._initialized, "You need to initialize the robot before moving it."
         assert self.in_limits(q), "Joint limits violated."
         self._enqueue(q)
+        self._sleep(self.send_delay)
 
     def get_q(self) -> np.ndarray:
         t = self._now() + self.query_delay / 2  # the unit answers here

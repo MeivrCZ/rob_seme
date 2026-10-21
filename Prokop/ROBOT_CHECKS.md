@@ -57,43 +57,32 @@ Done (2026-10-21, first five tests):
 - Speeds match the sim within 0.1 deg/s (speed units confirmed); accelerations
   roughly (the ramps last 1-2 samples at 18 Hz, so only to ~x2).
 - Joints start and stop together (coordinated move), as in the sim.
-- Queued moves BLEND: in `j1_queued_15_15` joint 1 passes 15 deg at full speed;
-  the sim still stops in between (to be changed).
 - `get_q` round trip 51 ms (41-154): `query_delay` = 0.05 s; `in_motion` ~10 ms:
   `status_delay` = 0.01 s; motion starts 93-147 ms (fit, mean 126) after
-  `move_to_q`: `command_delay` = 0.12 s. A loop of `get_q` + `in_motion` runs at
-  ~18 Hz. These are now the sim's defaults.
-- At the end the arm overshoots ~0.3 deg and settles within ~0.25 s.
-
-To run now, how the blending works beyond moving on straight:
-
-    uv run Prokop/tools/log_motion.py --real --tests j1_j4_corner j1_reverse j1_vias_10x3 j1_j4_arc_vias
-
-| Test | Question |
-| --- | --- |
-| `j1_j4_corner` | j1 to 20 deg, then j4 to 40 deg, queued: is the corner cut (j4 starts before j1 stops) or taken with a stop? |
-| `j1_reverse` | j1 to 20 deg, then back to 5 deg, queued: does it stop at 20 deg or turn early? |
-| `j1_vias_10x3` | ten queued via points 3 deg apart: one smooth move, or slowing at each? any "coordmv queue full"? |
-| `j1_j4_arc_vias` | nine via points on a curve in j1/j4 (like a planned path): is the curve followed, how much is cut? |
+  `move_to_q`: `command_delay` = 0.12 s; `move_to_q` itself blocks ~25 ms (the
+  serial write): `send_delay` = 0.025 s. A loop of `get_q` + `in_motion` runs at
+  ~18 Hz. These are the sim's defaults.
+- At the end the arm overshoots ~0.3 deg and settles within ~0.25 s (not
+  simulated).
+- Queued moves (second batch, 2026-10-21): blended only when the next move
+  continues in exactly the same joint-space direction (`j1_queued_15_15`,
+  `j1_vias_10x3`: one smooth move); a corner (`j1_j4_corner`) or a reversal
+  (`j1_reverse`) stops first; via points on a bending path (`j1_j4_arc_vias`)
+  nearly stop at each via (speed down to a few deg/s). The sim follows this
+  rule (stop unless the same direction); the arc takes 2.99 s in the sim, 2.95 s
+  on the robot.
 
 ## 4. Camera: `uv run Prokop/tools/camera_survey.py [--delay]`
 
-Done (2026-10-21): 1920 x 1200 x 3, `grab_image()` takes 186 ms (the first
-0.8 s): ctu_crs starts and stops the camera on every call, so each image is
-taken during the call (age < 186 ms) and at most ~5 images/s are possible.
-The first delay test failed: 2-3 frames per leg, and in q_home the arm is
-hardly in the camera view.
-
-To run now (robot homed, in q_home, work area free):
-
-    uv run Prokop/tools/camera_survey.py --delay
-
-It prints and checks a survey pose (flange pointing down at x 0.35 m, hoop
-centre 49 cm above the work area, in the camera view; >= 8 cm from the table and
-the cell in the pose, on the way there and during the swing), moves there at low
-speed, swings joint 1 by 15 deg and back at the lowest speed (~5 deg/s, ~12
-frames per leg), returns to q_home. Check `survey.png`: the hoop must be in it.
-Goes into `CRS93Sim(camera_delay=...)`.
+Done (2026-10-21):
+- 1920 x 1200 x 3, `grab_image()` takes 186 ms (the first 0.8 s): ctu_crs starts
+  and stops the camera on every call, so at most ~5 images/s.
+- Image delay (age when `grab_image` returns) 108 ms (`--delay` from the survey
+  pose; mismatch 30x lower than with no delay): `camera_delay` = 0.11 s.
+- `survey.png`: the hoop, seen face-on, appeared 3.0 cm nearer to the robot
+  than modelled, so the camera is at x ~0.475 m (~47 cm from the outer face of
+  the front cage wall, not 50); the ring size fits the modelled height to ~3 %.
+  `cell.py` uses this; the model now predicts the hoop within ~2 mm.
 
 Pose of the camera in the robot frame and its intrinsics: from Vojtěch's
 calibration.

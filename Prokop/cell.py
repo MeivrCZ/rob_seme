@@ -43,15 +43,18 @@ CAGE_HEIGHT = 1.08  # m, top edge above the table
 CAGE_XY = np.array([[-CAGE_APOTHEM, CAGE_APOTHEM], [-CAGE_APOTHEM, CAGE_APOTHEM]])
 
 # Camera: Basler ace 2 a2A1920-51gcBAS (Sony IMX392, colour, GigE), pointing
-# straight down, on the robot's axis (y = 0), 50 cm from the outer face of the
-# front cage wall, clamped to the right side of the rail. Not centred over the
-# work area: ~4 cm closer to the robot (confirmed by eye).
+# straight down, on the robot's axis (y = 0), clamped to the right side of the
+# rail; ~1 cm nearer to the robot than the work area centre (see CAMERA_X).
 CAMERA_RESOLUTION = (1920, 1200)  # px (width, height)
 CAMERA_PIXEL = 3.45e-6  # m, IMX392 pixel pitch
 # Body 29 x 29 mm footprint, 42 mm deep (ace 2 GigE housing), + the lens, a 28 mm
 # tall cylinder, as one box (x, y, z).
 CAMERA_SIZE = np.array([0.029, 0.029, 0.042 + 0.028])
-CAMERA_X = CAGE_APOTHEM + CAGE_WALL - 0.50
+# x from the survey image (tools/camera_survey.py, 2026-10-21): the hoop, placed by
+# the robot, appeared 3.0 cm nearer to the robot than modelled with the taped 50 cm
+# from the outer face of the front cage wall (x 0.445 m), i.e. the camera is ~47 cm
+# from it; the sticker rectangle in that image agrees.
+CAMERA_X = 0.475
 # Camera rail: 40 x 40 mm aluminium profile along x, top 131 cm above the table,
 # its right side touching the camera; held by a vertical 40 x 40 mm post standing
 # on the front cage wall.
