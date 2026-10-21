@@ -1,0 +1,94 @@
+Traceback (most recent call last):
+  File "C:\Users\Meivr\Desktop\CVUT\ROB\rob_seme\Vojtìch\rob_crs93_v4\extensions\prokop_bridge_runner.py", line 136, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\Meivr\Desktop\CVUT\ROB\rob_seme\Vojtìch\rob_crs93_v4\extensions\prokop_bridge_runner.py", line 132, in main
+    exec(code, globals_, globals_)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Meivr\Desktop\CVUT\ROB\rob_seme\Prokop\view_models.py", line 33, in <module>
+    import viser
+ModuleNotFoundError: No module named 'viser'
+Traceback (most recent call last):
+  File "C:\Users\Meivr\Desktop\CVUT\ROB\rob_seme\Vojtìch\rob_crs93_v4\extensions\prokop_bridge_runner.py", line 136, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\Meivr\Desktop\CVUT\ROB\rob_seme\Vojtìch\rob_crs93_v4\extensions\prokop_bridge_runner.py", line 132, in main
+    exec(code, globals_, globals_)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Meivr\Desktop\CVUT\ROB\rob_seme\Prokop\view_models.py", line 33, in <module>
+    import viser
+ModuleNotFoundError: No module named 'viser'
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
+(viser) Connection opened (0, 1 total), 520 persistent messages
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
+(viser) Connection opened (0, 1 total), 520 persistent messages
+(viser) Connection opened (1, 2 total), 520 persistent messages
+(viser) Connection closed (0, 1 total)
+(viser) Connection closed (1, 0 total)
+(viser) Connection opened (2, 1 total), 520 persistent messages
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
+(viser) Connection opened (0, 1 total), 520 persistent messages
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
+(viser) Connection opened (0, 1 total), 520 persistent messages
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+(viser) Connection opened (0, 1 total), 17 persistent messages
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
++------ viser (listening *:8080) -------+
+| +-----------------------------------+ |
+| | HTTP      | http://localhost:8080 | |
+| | Websocket | ws://localhost:8080   | |
+| +-----------------------------------+ |
++---------------------------------------+
+[CRS93 sync] Listening for joint angles at 127.0.0.1:8081
+Open http://localhost:8080 (Ctrl+C to quit)
+(viser) Connection opened (0, 1 total), 524 persistent messages

@@ -75,7 +75,7 @@ class TableClearanceGuard:
         if not np.isfinite(self.table_z_m) or not np.isfinite(self.clearance_m) or self.clearance_m < .01:
             raise ValueError('Table Z must be finite; minimum clearance 0.010 m')
         base = Path(root)
-        urdf = base / 'crs97.urdf'
+        urdf = base / "models" / 'crs93.urdf'
         if not urdf.is_file():
             raise FileNotFoundError(f'Cannot check arm geometry; missing {urdf}')
         doc = ET.parse(urdf).getroot()
@@ -90,9 +90,9 @@ class TableClearanceGuard:
             if mesh is None:
                 self.links[name] = None
                 continue
-            mesh_path = (base / mesh.get('filename')).resolve()
+            mesh_path = (urdf.parent / mesh.get('filename')).resolve()
             # Prevent unexpected paths outside the checked model directory.
-            if not mesh_path.is_relative_to(base.resolve()):
+            if not mesh_path.is_relative_to(urdf.parent.resolve()):
                 raise ValueError('Unsafe mesh path')
             points = _stl_vertices(mesh_path)
             scale = np.fromstring(mesh.get('scale', '1 1 1'), sep=' ')

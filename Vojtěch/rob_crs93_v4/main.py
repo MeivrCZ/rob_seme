@@ -85,6 +85,10 @@ def dispatch(ctx: Context, manager: ExtensionManager, modes: ModeManager, args: 
   pview start [PORT]       load (if needed) and start Prokop visualizer
   pview stop|status        shortcut for Prokop visualizer
   homo help                homography commands (no intrinsics/extrinsics)
+  homo3d help              3D hoop motion test (without camera or matrix fit)
+  homo3d plan [X0 X1 Y0 Y1 [NX NY]]  precheck 36 positions, NO motion
+  homo3d run               execute guarded scan after successful plan
+  homo3d status            show 3D motion test summary
   homo board help          ChArUco 10x14 calibration (single frame + >=3 robot anchors)
   homo board capture       detect ChArUco corners from shared camera
   homo capture             alternate: click target centre with REAL robot/camera
@@ -276,6 +280,10 @@ Extensions: diagnostics, homography_calibration, prokop_visualizer
         if "homography_calibration" not in manager.instances:
             manager.load("homography_calibration")
         manager.call("homography_calibration", args[1:])
+    elif command == "homo3d":
+        if "hoop3d_motion" not in manager.instances:
+            manager.load("hoop3d_motion")
+        manager.call("hoop3d_motion", args[1:])
     elif command == "pview":
         if len(args) not in (2, 3):
             print("Try: pview start [PORT] | pview stop | pview status")

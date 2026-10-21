@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "image_size": null,
+  "target_offset_tcp_m": [
+    0.135,
+    0.0,
+    -0.03
+  ],
+  "z_tolerance_m": 0.003,
+  "samples": [],
+  "is_dirty": true
+}
