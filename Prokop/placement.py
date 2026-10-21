@@ -1,17 +1,21 @@
-"""Random placement of the task: turntable somewhere on the table, base plate with
-the puzzle somewhere on the turntable.
+"""Task models and random placement: the turntable on the table, the base with the
+puzzle on the turntable.
 
-Rules (assignment + team decisions):
-  - the turntable with the base and puzzle must not touch the robot (with adapter and
-    the hoop at its nominal mount) in q_home; MIN_CLEARANCE is kept for any
-    rotation of the turntable (checked against the volume swept by the spinning
-    task, a solid of revolution),
-  - the base may overhang the turntable, but must not tip over: the centre of mass
-    of base + puzzle + magnets has to project into the support region, which is the
-    intersection of the base footprint (125 x 125 mm square) and the turntable top
-    disc (both convex, so the intersection is convex), with STABILITY_MARGIN.
+Placement rules (assignment + team decisions):
 
-All frames are in the ctu_crs robot base frame (m).
+* The turntable with the base and puzzle must not touch the robot (with its
+  adapter and the hoop at its nominal mount) in q_home, for any rotation of the
+  turntable: MIN_CLEARANCE is kept to the volume swept by the spinning task, a
+  solid of revolution.
+* The base may overhang the turntable but must not tip over: the centre of mass
+  of base + puzzle + magnets has to project into the support region, the
+  intersection of the base footprint (125 x 125 mm) and the turntable top disc
+  (both convex, so the intersection is convex), with STABILITY_MARGIN.
+* The whole turntable stands inside the cage; a "viable" placement has its
+  centre in the work area seen by the camera.
+
+All frames are in the ctu_crs robot base frame [m]. The cell geometry (table,
+cage, work area) is defined in cell.py and re-exported here.
 """
 
 from __future__ import annotations
@@ -22,25 +26,14 @@ from pathlib import Path
 import numpy as np
 import trimesh
 import yourdfpy
+from cell import CAGE_XY, TABLE_Z, WORK_AREA_XY, in_cage  # noqa: F401 (re-exported)
 from ctu_crs import CRS93
 
 MODELS = Path(__file__).resolve().parent / "models"  # URDFs and their meshes
 
-# Table surface. The robot's round base (RoboDK mesh bottom, 24.8 mm below the
-# ctu base frame) stands on a square steel plate whose top is 31 mm (+-2 mm,
-# measured with a tape) above the table.
-TABLE_Z = -0.0248 - 0.031
-# Front of the robot's round base (x max of the base mesh).
-ROBOT_FRONT_X = 0.099
-# PLACEHOLDER, to be measured: the cage, i.e. where on the table the turntable
-# centre may be at all [[x_min, x_max], [y_min, y_max]]. Random placement uses it.
-CAGE_XY = np.array([[-0.8, 0.8], [-0.8, 0.8]])
-# Work area on the table [[x_min, x_max], [y_min, y_max]]: the part the camera sees,
-# 30 cm deep, 48 cm wide, centred on the robot, starting 22.2 cm in front of the
-# robot's front face. The viable placement puts the turntable centre in it
-# (random_placement(rng, WORK_AREA_XY)).
-WORK_AREA_XY = np.array([[ROBOT_FRONT_X + 0.222, ROBOT_FRONT_X + 0.222 + 0.30],
-                         [-0.24, 0.24]])
+# Table, cage and work area (the part the camera sees): see cell.py. Random
+# placement puts the turntable inside the cage, the viable placement in the work
+# area (random_placement(rng, WORK_AREA_XY)).
 MIN_CLEARANCE = 0.01  # m, to the robot in q_home
 STABILITY_MARGIN = 0.005  # m, centre of mass from the edge of the support region
 BASE_HALF = 0.0625  # m, half side of the base plate footprint
@@ -58,8 +51,17 @@ HOOP_MOUNT = np.eye(4)
 
 
 def load_urdf(path: Path) -> yourdfpy.URDF:
-    # Mesh paths in the URDFs are relative ("meshes/x.stl"), resolve them against
-    # the URDF's own directory.
+    """Loads a URDF with its visual and collision meshes.
+
+    Mesh paths in the URDFs are relative ("meshes/x.stl") and resolved against the
+    URDF's own directory.
+
+    Args:
+        path: The URDF file.
+
+    Returns:
+        The model, with a collision scene graph.
+    """
     return yourdfpy.URDF.load(path, mesh_dir=str(path.parent),
                               build_collision_scene_graph=True,
                               load_collision_meshes=True)
@@ -67,7 +69,15 @@ def load_urdf(path: Path) -> yourdfpy.URDF:
 
 def collision_meshes(urdf: yourdfpy.URDF, T_world: np.ndarray = np.eye(4)
                      ) -> list[trimesh.Trimesh]:
-    """Collision meshes of @urdf in its current configuration, in world frame."""
+    """Collision meshes of a URDF in its current configuration.
+
+    Args:
+        urdf: The model (loaded with load_urdf).
+        T_world: Pose of the model's base link in the world frame.
+
+    Returns:
+        Copies of the collision meshes in the world frame.
+    """
     scene = urdf.collision_scene
     meshes = []
     for node in scene.graph.nodes_geometry:
@@ -77,6 +87,17 @@ def collision_meshes(urdf: yourdfpy.URDF, T_world: np.ndarray = np.eye(4)
 
 
 def yaw_matrix(x: float, y: float, z: float, yaw: float) -> np.ndarray:
+    """Builds a transform from a translation and a rotation about z.
+
+    Args:
+        x: Translation x [m].
+        y: Translation y [m].
+        z: Translation z [m].
+        yaw: Rotation about z [rad].
+
+    Returns:
+        The 4x4 homogeneous transform.
+    """
     T = trimesh.transformations.rotation_matrix(yaw, [0, 0, 1])
     T[:3, 3] = x, y, z
     return T
@@ -84,23 +105,43 @@ def yaw_matrix(x: float, y: float, z: float, yaw: float) -> np.ndarray:
 
 @dataclass
 class Placement:
-    turntable_xy: np.ndarray  # turntable centre on the table, robot base frame
-    base_xy: np.ndarray  # base centre relative to the turntable top centre
-    base_yaw: float  # rad, base rotation about the turntable axis
+    """Where the task stands.
+
+    Attributes:
+        turntable_xy: Turntable centre on the table, robot base frame [m].
+        base_xy: Base centre relative to the turntable top centre [m].
+        base_yaw: Base rotation about the turntable axis [rad].
+    """
+
+    turntable_xy: np.ndarray
+    base_xy: np.ndarray
+    base_yaw: float
 
     def turntable_T(self) -> np.ndarray:
-        """Pose of the turntable origin (bottom centre)."""
+        """Returns the pose of the turntable origin (bottom centre) on the table."""
         return yaw_matrix(*self.turntable_xy, TABLE_Z, 0.0)
 
     def base_T_top(self) -> np.ndarray:
-        """Pose of the base in the turntable 'top' frame (standing on its foam)."""
+        """Returns the pose of the base in the turntable top frame (on its foam)."""
         return yaw_matrix(*self.base_xy, BASE_FOAM, self.base_yaw)
 
 
 class TaskScene:
-    """Static models of the task and the robot in q_home, for placement checks."""
+    """Models of the task and of the robot in q_home, for placement checks.
+
+    Attributes:
+        turntable: Turntable model.
+        base: ArUco base model (with its foam).
+        puzzle: Puzzle model (TASK_PUZZLE).
+        T_top: Turntable top frame in the turntable frame.
+        T_mount: Puzzle mount frame in the base frame.
+        turntable_radius: Radius of the turntable [m].
+        com_xy: Centre of mass of base + puzzle + magnets, xy in the base frame [m].
+        robot_home: Collision manager of the robot with the hoop in q_home.
+    """
 
     def __init__(self) -> None:
+        """Loads the models."""
         self.turntable = load_urdf(MODELS / "turntable.urdf")
         self.base = load_urdf(MODELS / "base.urdf")
         self.puzzle = load_urdf(MODELS / f"{TASK_PUZZLE}.urdf")
@@ -119,7 +160,11 @@ class TaskScene:
             self.robot_home.add_object(f"robot{i}", m)
 
     def _com_xy(self) -> np.ndarray:
-        """Centre of mass of base + puzzle + magnets, xy in the base frame."""
+        """Computes the centre of mass of base + puzzle + magnets.
+
+        Returns:
+            Its xy in the base frame [m].
+        """
         parts = [(m, np.eye(4)) for m in collision_meshes(self.base)]
         parts += [(m, self.T_mount) for m in collision_meshes(self.puzzle)]
         masses, coms = [], []
@@ -132,8 +177,16 @@ class TaskScene:
         return np.average(coms, axis=0, weights=masses)
 
     def stability_margin(self, p: Placement) -> float:
-        """Distance [m] of the centre of mass from the edge of the support region
-        (square footprint intersected with the top disc); negative = tips over."""
+        """Tip-over margin of a placement.
+
+        Args:
+            p: The placement.
+
+        Returns:
+            Distance [m] of the centre of mass from the edge of the support region
+            (base footprint intersected with the turntable top); negative if the
+            base tips over.
+        """
         com_base = self.com_xy
         com_top = trimesh.transform_points([[*com_base, 0.0]], p.base_T_top())[0, :2]
         to_square = BASE_HALF - np.abs(com_base).max()
@@ -141,7 +194,14 @@ class TaskScene:
         return min(to_square, to_disc)
 
     def task_meshes(self, p: Placement) -> list[trimesh.Trimesh]:
-        """Collision meshes of turntable, base and puzzle in the world frame."""
+        """Collision meshes of the turntable, base and puzzle.
+
+        Args:
+            p: The placement.
+
+        Returns:
+            The meshes in the world frame.
+        """
         T_tt = p.turntable_T()
         T_base = T_tt @ self.T_top @ p.base_T_top()
         return (collision_meshes(self.turntable, T_tt)
@@ -149,9 +209,18 @@ class TaskScene:
                 + collision_meshes(self.puzzle, T_base @ self.T_mount))
 
     def swept_task_mesh(self, p: Placement, dz: float = 0.002) -> trimesh.Trimesh:
-        """Volume swept by turntable + base + puzzle during a full turn, in the world
-        frame: solid of revolution of the max. radius from the turntable axis per
-        height slab @dz (sampled on the surfaces, padded by @dz)."""
+        """Volume swept by the turntable, base and puzzle during a full turn.
+
+        A solid of revolution of the largest radius from the turntable axis per
+        height slab (sampled on the surfaces, padded by the slab height).
+
+        Args:
+            p: The placement.
+            dz: Slab height [m].
+
+        Returns:
+            The swept volume as a closed mesh in the world frame.
+        """
         T_tt = p.turntable_T()
         local = [m.copy().apply_transform(np.linalg.inv(T_tt))
                  for m in self.task_meshes(p)]
@@ -179,17 +248,35 @@ class TaskScene:
         return swept.apply_transform(T_tt)
 
     def clearance_to_robot(self, p: Placement) -> float:
-        """Minimum distance [m] of the spinning task to the robot in q_home
-        (0 if touching)."""
+        """Clearance of the spinning task to the robot in q_home.
+
+        Args:
+            p: The placement.
+
+        Returns:
+            Minimum distance [m] (0 if touching).
+        """
         task = trimesh.collision.CollisionManager()
         task.add_object("swept", self.swept_task_mesh(p))
         return max(0.0, self.robot_home.min_distance_other(task))
 
     def random_placement(self, rng: np.random.Generator, area: np.ndarray = CAGE_XY,
                          max_tries: int = 1000) -> Placement:
-        """Uniformly random placement satisfying the rules in the module doc, with
-        the turntable centre in @area [[x_min, x_max], [y_min, y_max]]: the cage
-        by default, WORK_AREA_XY for a placement the camera sees."""
+        """Draws a uniformly random placement satisfying the rules of the module.
+
+        Args:
+            rng: Random generator.
+            area: Region [[x_min, x_max], [y_min, y_max]] of the turntable centre:
+                the cage by default, WORK_AREA_XY for a placement the camera
+                sees. The whole turntable stays inside the cage walls in any case.
+            max_tries: Number of draws before giving up.
+
+        Returns:
+            The placement.
+
+        Raises:
+            RuntimeError: If no draw satisfies the rules.
+        """
         # Base centre within the disc where any part of the base can still touch it.
         reach = self.turntable_radius + BASE_HALF * np.sqrt(2)
         for _ in range(max_tries):
@@ -197,7 +284,8 @@ class TaskScene:
             p = Placement(rng.uniform(area[:, 0], area[:, 1]),
                           r * np.array([np.cos(phi), np.sin(phi)]),
                           rng.uniform(0, 2 * np.pi))
-            if (self.stability_margin(p) >= STABILITY_MARGIN
+            if (in_cage(p.turntable_xy, self.turntable_radius)
+                    and self.stability_margin(p) >= STABILITY_MARGIN
                     and self.clearance_to_robot(p) >= MIN_CLEARANCE):
                 return p
         raise RuntimeError(f"no valid placement found in {max_tries} tries")

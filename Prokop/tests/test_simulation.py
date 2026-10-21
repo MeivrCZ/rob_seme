@@ -1,5 +1,7 @@
 """simulation.CRS93Sim: the ctu_crs.CRS93 interface, shapes, joint limits."""
 
+import time
+
 import numpy as np
 import pytest
 from conftest import free_port
@@ -79,6 +81,17 @@ def test_move_before_initialize():
         s.viewer.server.stop()
 
 
+def test_hard_home_ends_at_measured_pose():
+    """Hard home ends where the real CRS93 did (2026-10-21), in degrees."""
+    s = make_sim()
+    try:
+        s.hard_home()
+        assert np.allclose(np.rad2deg(s.get_q()),
+                           [163.4, 0.3, -56.0, 176.7, 14.9, -172.0], atol=0.15)
+    finally:
+        s.viewer.server.stop()
+
+
 def test_initialize_homes_to_q_home():
     s = make_sim(q0=np.zeros(6))
     try:
@@ -121,7 +134,8 @@ def test_motion_is_continuous(stopped):
     stopped.wait_for_motion_stop()
     q1 = np.array(samples)[:, 0]
     assert np.all(np.diff(q1) >= -1e-12)  # monotonic in the moving joint
-    assert q1.min() >= start[0] - 1e-9 and q1.max() <= target[0] + 1e-9
+    # the target is rounded to IRC, like the real command
+    assert q1.min() >= start[0] - IRC_TOL and q1.max() <= target[0] + IRC_TOL
     assert np.allclose(np.array(samples)[:, 1:], start[1:])
 
 
@@ -135,6 +149,75 @@ def test_slower_speed_takes_longer(stopped):
         return d
 
     assert duration(0.2) > duration(1.0)
+
+
+# --- blending of queued moves (measured on the CRS93, 2026-10-21) ---
+
+def _queued_duration(sim, offsets_deg) -> float:
+    """Sim time from the first move_to_q until the last queued move ends."""
+    t0 = sim._now()
+    for dq in offsets_deg:
+        sim.move_to_q(sim.q_home + np.deg2rad(dq))
+    d = sim._motion_end() - t0
+    sim.wait_for_motion_stop()
+    move(sim, sim.q_home)
+    return d
+
+
+@pytest.fixture(scope="module")
+def realtime():
+    """A sim at real-time speed: blending needs the next command to arrive before
+    the running move slows down, which script overhead scaled by TIME_SCALE would
+    prevent (as on the real robot, a late command means a stop)."""
+    s = CRS93Sim(port=free_port(), time_scale=1.0, keep_alive=False)
+    s.initialize(home=False)
+    yield s
+    s.viewer.server.stop()
+
+
+def test_same_direction_moves_blend(realtime):
+    """Ten queued 3 deg steps take as long as one 30 deg move."""
+    single = _queued_duration(realtime, [[30, 0, 0, 0, 0, 0]])
+    chain = _queued_duration(realtime, [[3 * (i + 1), 0, 0, 0, 0, 0] for i in range(10)])
+    assert chain == pytest.approx(single, abs=0.01)
+
+
+def test_corner_and_reversal_stop(stopped):
+    """A corner or a reversal starts from standstill: longer than blended."""
+    def stops(offsets):
+        stopped.move_to_q(stopped.q_home + np.deg2rad(offsets[0]))
+        stopped.move_to_q(stopped.q_home + np.deg2rad(offsets[1]))
+        with stopped._lock:
+            segs = list(stopped._segments[-2:])
+        stopped.wait_for_motion_stop()
+        move(stopped, stopped.q_home)
+        return len(segs) == 2 and segs[1].t0 == pytest.approx(segs[0].t_end)
+
+    assert stops([[20, 0, 0, 0, 0, 0], [20, 0, 0, 40, 0, 0]])  # corner
+    assert stops([[20, 0, 0, 0, 0, 0], [5, 0, 0, 0, 0, 0]])  # reversal
+
+
+def test_blended_motion_is_continuous(realtime):
+    """Merging into a running move does not make the configuration jump."""
+    realtime.move_to_q(realtime.q_home + np.deg2rad([15, 0, 0, 0, 0, 0]))
+    time.sleep(0.2)  # moving
+    before = realtime._q_at(realtime._now())
+    realtime.move_to_q(realtime.q_home + np.deg2rad([30, 0, 0, 0, 0, 0]))
+    after = realtime._q_at(realtime._now())
+    last = realtime._segments[-1]  # merged: one move 0 -> 30 deg
+    assert np.rad2deg(last.q_to[0] - last.q_from[0]) == pytest.approx(30, abs=0.01)
+    realtime.wait_for_motion_stop()
+    assert after[0] >= before[0] and after[0] - before[0] < np.deg2rad(2)
+    assert np.allclose(realtime.get_q(), realtime.q_home + np.deg2rad([30, 0, 0, 0, 0, 0]),
+                       atol=IRC_TOL)
+    move(realtime, realtime.q_home)
+
+
+def test_move_to_q_blocks_for_send_delay(stopped):
+    t = time.monotonic()
+    stopped.move_to_q(stopped.q_home + np.deg2rad([5, 0, 0, 0, 0, 0]))
+    assert (time.monotonic() - t) * TIME_SCALE >= stopped.send_delay * 0.9
+    stopped.wait_for_motion_stop()
 
 
 # --- joint limits ---

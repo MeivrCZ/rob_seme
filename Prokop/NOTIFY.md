@@ -1,16 +1,18 @@
-# Notes for the team (2026-10-20)
+# Notes for the team (2026-10-20, updated 2026-10-21)
 
 ## Vojtěch: changes in Prokop/ that affect your current code
 
 Your current `rob_crs93_v4` code will break against `Prokop/` as it is now. As you
 are rewriting it anyway, here is what changed:
 
-- **Joint-6 view offset removed.** `JOINT6_VIEW_OFFSET_RAD` and `display_q()` are
-  gone from `view_models.py`. The URDF was right without it: in `q_home` the
-  adapter triangle and the hoop point down, as on the real robot, and the URDF
-  flange equals `ctu_crs` `fk(q)` exactly. The offset rotated the drawn hoop
-  by 180 deg (pointing up), away from the FK. `tests/test_homography.py` checks
-  for the removed code.
+- **Joint-6 view offset removed, adapter turned in the model instead.** On the
+  CRS93 station the adapter is screwed on turned by 180 deg, so the hoop points
+  up in q_home: that is what your `JOINT6_VIEW_OFFSET_RAD` compensated. The
+  offset (and `display_q()`) are gone from `view_models.py`, because they made
+  the drawn flange disagree with `fk(q)`; the turn is now in the robot model
+  itself (`models/crs93.urdf`, `ADAPTER_TURN` in `tools/robodk2urdf.py`), so no
+  joint offset is needed anywhere. `tests/test_homography.py` checks for the
+  removed code.
 - **Files moved.** URDFs and meshes are now in `Prokop/models/`, generators in
   `Prokop/tools/`. Code that loads `Prokop/*.urdf` (e.g. `app/robot.py`,
   `tests/test_table_guard_and_scan.py`) needs the new path; `placement.MODELS`
@@ -27,3 +29,8 @@ are rewriting it anyway, here is what changed:
   `ctu_crs.CRS93` shown in the Viser scene. Scripts written against the
   `CRS93` interface can be tested in it first and run on the real robot by
   swapping one line. See `Prokop/README.md`.
+- **Measurements and experiments.** Everything measured at the station (cell
+  geometry, camera pose, delays, motion behaviour) is in
+  `Prokop/docs/MEASUREMENTS.md` and `Prokop/docs/EXPERIMENTS.md`; the cell
+  geometry and the camera model (pose, estimated intrinsics) are importable from
+  `Prokop/cell.py`.

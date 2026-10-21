@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import trimesh
 from placement import (BASE_FOAM, MIN_CLEARANCE, STABILITY_MARGIN, TABLE_Z,
-                       CAGE_XY, WORK_AREA_XY, Placement)
+                       CAGE_XY, WORK_AREA_XY, Placement, in_cage)
 
 
 def test_placement_transforms(task):
@@ -28,6 +28,7 @@ def test_random_placements_follow_rules(task, rng):
         assert p.turntable_xy.shape == (2,) and p.base_xy.shape == (2,)
         assert np.all(p.turntable_xy >= CAGE_XY[:, 0])
         assert np.all(p.turntable_xy <= CAGE_XY[:, 1])
+        assert in_cage(p.turntable_xy, task.turntable_radius)
         assert task.stability_margin(p) >= STABILITY_MARGIN
         assert task.clearance_to_robot(p) >= MIN_CLEARANCE
 

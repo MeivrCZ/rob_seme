@@ -64,3 +64,19 @@ def test_grab_timing(tmp_path):
     assert (r["width"], r["height"], r["channels"]) == (80, 60, 3)
     assert r["grab_s_median"] >= 0.01
     assert (tmp_path / "q_home.png").is_file()
+
+
+def test_survey_pose_visible_and_clear(robot):
+    from cell import CAMERA_RESOLUTION, TABLE_Z
+    from collision import ArmChecker
+    checker = ArmChecker()
+    q, info = camera_survey.survey_pose(robot, checker)
+    swing = np.zeros(6)
+    swing[0] = np.deg2rad(camera_survey.DELAY_MOVE_DEG)
+    for qq in (q, q + swing):
+        assert robot.in_limits(qq)
+        h = checker.hoop_center(qq)
+        uv = camera_survey.project(h)
+        assert np.all(uv > 0) and np.all(uv < CAMERA_RESOLUTION)
+        assert camera_survey.HOOP_HEIGHT[0] <= h[2] - TABLE_Z <= camera_survey.HOOP_HEIGHT[1]
+    assert all(d >= camera_survey.MIN_CLEARANCE for d, _ in info["clearance_m"].values())

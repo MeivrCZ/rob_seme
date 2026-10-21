@@ -1,0 +1,49 @@
+{
+  "started": "2026-10-21T13:45:10",
+  "timing": {
+    "width": 1920,
+    "height": 1200,
+    "channels": 3,
+    "first_grab_s": 0.7915178890007155,
+    "grab_s_median": 0.18625086700012616,
+    "grab_s_max": 0.1874106879995452
+  },
+  "survey_pose": {
+    "q_deg": [
+      -7.5,
+      -4.04,
+      -91.71,
+      0.0,
+      -84.26,
+      0.0
+    ],
+    "hoop_center_m": [
+      0.481,
+      -0.063,
+      0.49
+    ],
+    "hoop_pixel": [
+      544.0,
+      832.0
+    ],
+    "clearance_m": {
+      "pose": [
+        0.152,
+        "table"
+      ],
+      "path_from_q_home": [
+        0.152,
+        "table"
+      ],
+      "swing": [
+        0.152,
+        "table"
+      ]
+    }
+  },
+  "delay": {
+    "delay_s": 0.108,
+    "mismatch": 7.406357688250005e-05,
+    "mismatch_at_0": 0.0024049572780894314
+  }
+}

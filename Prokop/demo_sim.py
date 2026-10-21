@@ -1,11 +1,13 @@
-"""Smoke test of the simulated CRS93: homing, a few joint moves and a square traced
-by the flange (IK), then back home.
+"""Smoke test of the simulated CRS93: homing, joint moves, a square traced by the
+flange (IK), back home.
 
-Run from the repo root:
-    uv run Prokop/demo_sim.py               # open http://localhost:8080, press Enter
+Usage:
+    From the repo root::
 
-Uses only the ctu_crs CRS93 interface, so swapping the two robot lines below runs
-it on the real robot.
+        uv run Prokop/demo_sim.py               # open http://localhost:8080, press Enter
+
+Uses only the ctu_crs CRS93 interface, so swapping the robot line below runs it
+on the real robot (which then homes: start from a safe pose).
 """
 
 import numpy as np
