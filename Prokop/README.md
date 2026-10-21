@@ -21,7 +21,7 @@ robot = CRS93Sim()                  # robot = CRS93()
 
 Extra keyword arguments (simulation only): `q0`, `port`, `time_scale`,
 `keep_alive` and the hardware delays `command_delay`, `query_delay`,
-`camera_delay`. What is and is not simulated is listed in the `simulation.py`
+`status_delay`, `camera_delay` (defaults measured on the CRS93; 0 = ideal). What is and is not simulated is listed in the `simulation.py`
 docstring.
 
 ## Layout

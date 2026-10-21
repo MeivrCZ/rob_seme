@@ -14,9 +14,9 @@ max 30 deg on joint 1). The queued tests send several moves without waiting:
 how the control unit blends them (same direction, corner, reversal, a dense
 chain of via points like a planned path). Writes one CSV per test (t [s], q1..q6 [rad]) to
 Prokop/motion_logs/<real|sim>/ and prints the duration, peak joint speeds and
-the delays for CRS93Sim: start latency (move_to_q until the joints move, i.e.
-command_delay + query_delay / 2, +- half a sampling period, slightly more
-because of the speed-up ramp) and the get_q round trip (query_delay).
+the delays for CRS93Sim: start latency (move_to_q until the joints move: about
+command_delay, +- half a sampling period) and the get_q round trip
+(query_delay); the loop period minus get_q is about status_delay (in_motion).
 """
 
 import argparse

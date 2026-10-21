@@ -27,14 +27,19 @@ MARS control unit are replaced:
     profile in the same units as on the real robot,
   - the gripper is a stub, grab_image is not simulated (no camera model yet),
     release / reset_motors / close do nothing.
-Hardware delays (sim seconds, default 0; script execution time is real anyway):
+Hardware delays (sim seconds; script execution time is real anyway), defaults
+measured on the CRS93 (2026-10-21, tools/log_motion.py), 0 for an ideal robot:
   - command_delay: from move_to_q until the control unit starts the move (the
-    call itself returns at once, as the serial write does),
-  - query_delay: round trip of a state query; get_q / in_motion block for it
-    and return the state from its middle, wait_for_motion_stop returns
-    query_delay / 2 after the motion ends (at least query_delay after the call),
+    call itself returns at once, as the serial write does); 0.12 s,
+  - query_delay: round trip of the joint position query; get_q blocks for it
+    and returns the configuration from its middle; 0.05 s,
+  - status_delay: round trip of the status query (ready / in motion); in_motion
+    blocks for it and returns the state from its middle, wait_for_motion_stop
+    returns status_delay / 2 after the motion ends (at least status_delay after
+    the call); 0.01 s,
   - camera_delay: age of the image when grab_image returns (stored for the
-    simulated camera, not used yet).
+    simulated camera, not used yet); not measured yet, < GRAB_TIME (the real
+    grab_image takes 186 ms and the image is taken during the call).
 One sim clock (time_scale) drives the robot, the delays and the turntable spin;
 the render loop shows the whole scene at one time, atomically.
 When the script ends, queued moves finish and the scene stays open (keep_alive)
@@ -61,6 +66,15 @@ from numpy.typing import ArrayLike
 from view_models import SceneViewer
 
 RENDER_FPS = 30.0
+# Measured defaults of the hardware delays [s] (see the module doc).
+COMMAND_DELAY = 0.12
+QUERY_DELAY = 0.05
+STATUS_DELAY = 0.01
+CAMERA_DELAY = 0.0  # PLACEHOLDER, to be measured (tools/camera_survey.py --delay)
+# Real grab_image duration [s] (ctu_crs starts and stops the camera per call), the
+# first call opening the camera; for the simulated camera.
+GRAB_TIME = 0.186
+FIRST_GRAB_TIME = 0.8
 HISTORY = 1.0  # s, finished moves kept for state queries reaching into the past
 
 
@@ -130,8 +144,10 @@ class CRS93Sim(CRS93):
     def __init__(self, tty_dev: str | None = "/dev/mars", baudrate: int = 19200, *,
                  q0: ArrayLike | None = None, port: int = 8080,
                  time_scale: float = 1.0, keep_alive: bool = True,
-                 command_delay: float = 0.0, query_delay: float = 0.0,
-                 camera_delay: float = 0.0):
+                 command_delay: float = COMMAND_DELAY,
+                 query_delay: float = QUERY_DELAY,
+                 status_delay: float = STATUS_DELAY,
+                 camera_delay: float = CAMERA_DELAY):
         """Same arguments as CRS93 (@tty_dev and @baudrate are ignored), plus the
         simulation ones: @q0 initial configuration (default q_home: the arm is
         wherever it was left, homing moves it anyway), Viser @port, @time_scale
@@ -143,6 +159,7 @@ class CRS93Sim(CRS93):
         self._t_start = time.monotonic()
         self.command_delay = command_delay
         self.query_delay = query_delay
+        self.status_delay = status_delay
         self.camera_delay = camera_delay
         self._lock = threading.Lock()
         self._segments: list[Segment] = []
@@ -292,14 +309,14 @@ class CRS93Sim(CRS93):
         return self._q_at(t)
 
     def in_motion(self) -> bool:
-        t = self._now() + self.query_delay / 2
-        self._sleep(self.query_delay)
+        t = self._now() + self.status_delay / 2
+        self._sleep(self.status_delay)
         return self._in_motion_at(t)
 
     def wait_for_motion_stop(self):
-        t_return = self._now() + self.query_delay
+        t_return = self._now() + self.status_delay
         while True:  # moves may be queued meanwhile (other threads)
-            dt = max(t_return, self._motion_end() + self.query_delay / 2) - self._now()
+            dt = max(t_return, self._motion_end() + self.status_delay / 2) - self._now()
             if dt <= 0:
                 break
             self._sleep(dt)

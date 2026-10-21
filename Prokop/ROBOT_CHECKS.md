@@ -59,9 +59,10 @@ Done (2026-10-21, first five tests):
 - Joints start and stop together (coordinated move), as in the sim.
 - Queued moves BLEND: in `j1_queued_15_15` joint 1 passes 15 deg at full speed;
   the sim still stops in between (to be changed).
-- `get_q` round trip 51 ms (41-154): `query_delay` ~ 0.05 s; motion starts
-  93-147 ms after `move_to_q`: `command_delay` ~ 0.12 s. A loop of `get_q` +
-  `in_motion` runs at ~18 Hz.
+- `get_q` round trip 51 ms (41-154): `query_delay` = 0.05 s; `in_motion` ~10 ms:
+  `status_delay` = 0.01 s; motion starts 93-147 ms (fit, mean 126) after
+  `move_to_q`: `command_delay` = 0.12 s. A loop of `get_q` + `in_motion` runs at
+  ~18 Hz. These are now the sim's defaults.
 - At the end the arm overshoots ~0.3 deg and settles within ~0.25 s.
 
 To run now, how the blending works beyond moving on straight:

@@ -132,7 +132,8 @@ def test_motion_is_continuous(stopped):
     stopped.wait_for_motion_stop()
     q1 = np.array(samples)[:, 0]
     assert np.all(np.diff(q1) >= -1e-12)  # monotonic in the moving joint
-    assert q1.min() >= start[0] - 1e-9 and q1.max() <= target[0] + 1e-9
+    # the target is rounded to IRC, like the real command
+    assert q1.min() >= start[0] - IRC_TOL and q1.max() <= target[0] + IRC_TOL
     assert np.allclose(np.array(samples)[:, 1:], start[1:])
 
 
