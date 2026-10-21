@@ -1,16 +1,16 @@
 """The static work cell around the CRS93: table, work area, cage, camera rail and
 camera, as constants and collision meshes.
 
+Frame: the ctu_crs robot base frame [m], x forward (the arm in q_home), y to the
+left, z up, origin on the robot's vertical axis. "Right" is -y, as seen from the
+flange in q_home looking forward.
+
 Names: the RoboDK base mesh is the robot's black steel "foot" (square, 203 mm,
-50.8 mm high, bolted to the table) with the "round base" (a truncated cone) on
-top of it.
+50.8 mm high, bolted into a cut-out of the table) with the "round base" (a
+truncated cone) on top of it.
 
-Robot base frame (ctu_crs, m): x forward (the arm in q_home), y to the left, z up,
-origin on the robot's vertical axis. "Right" below is -y, as seen from the flange
-in q_home looking forward.
-
-Measured (tape, 2026-10-21): table height, work area, cage side, rail height and
-section, camera position along the rail. PLACEHOLDER marks what is not measured.
+Where every value comes from (tape, photo, camera image, estimate) is listed in
+docs/MEASUREMENTS.md; PLACEHOLDER marks values not measured.
 """
 
 from __future__ import annotations
@@ -84,21 +84,44 @@ CAMERA_K = np.array([[CAMERA_FOCAL / CAMERA_PIXEL, 0, (CAMERA_RESOLUTION[0] - 1)
 
 
 def in_cage(xy: np.ndarray, margin: float = 0.0) -> bool:
-    """Whether the point @xy is inside the cage, at least @margin from its walls."""
+    """Whether a point on the table is inside the cage.
+
+    Args:
+        xy: Point [m], robot base frame.
+        margin: Required distance from the inner face of every wall [m].
+
+    Returns:
+        True if @xy is at least @margin inside all eight walls.
+    """
     angles = np.arange(8) * np.pi / 4
     normals = np.column_stack([np.cos(angles), np.sin(angles)])
     return bool(np.all(normals @ np.asarray(xy) <= CAGE_APOTHEM - margin))
 
 
 def _box(size, center, yaw: float = 0.0) -> trimesh.Trimesh:
+    """Builds a box mesh.
+
+    Args:
+        size: Extents (x, y, z) [m] before the rotation.
+        center: Centre [m].
+        yaw: Rotation about z [rad].
+
+    Returns:
+        The box.
+    """
     T = trimesh.transformations.rotation_matrix(yaw, [0, 0, 1])
     T[:3, 3] = center
     return trimesh.creation.box(extents=size, transform=T)
 
 
 def cell_meshes() -> dict[str, trimesh.Trimesh]:
-    """Collision meshes of the cage walls, the camera rail with its post and the
-    camera, in the robot base frame (the table itself is the plane z = TABLE_Z)."""
+    """Collision meshes of the static cell (the table is the plane z = TABLE_Z).
+
+    Returns:
+        Meshes in the robot base frame by name: cage_wall_0 .. cage_wall_7
+        (wall k faces the direction k * 45 deg from +x), camera_rail,
+        camera_rail_post, camera.
+    """
     meshes = {}
     for k in range(8):
         a = k * np.pi / 4

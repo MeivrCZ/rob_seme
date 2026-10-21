@@ -1,4 +1,4 @@
-"""Rebuild a broken (holey, non-manifold) mesh into a watertight solid.
+"""Rebuilds a broken (holey, non-manifold) mesh into a watertight solid.
 
 Used by robodk2urdf.py for the RoboDK link meshes, which miss triangles. Their
 vertices are correct, so the solid is rebuilt from them: the surface is split into
@@ -26,6 +26,14 @@ FLAT_THICKNESS = 1.0  # mm, thickness given to flat strips that lie on no hull
 
 
 def _hull(points: np.ndarray) -> trimesh.Trimesh | None:
+    """Convex hull of points.
+
+    Args:
+        points: Points [mm].
+
+    Returns:
+        The hull, or None if the points are (nearly) planar.
+    """
     try:
         h = trimesh.convex.convex_hull(points)
     except Exception:  # (near) planar point set
@@ -35,6 +43,17 @@ def _hull(points: np.ndarray) -> trimesh.Trimesh | None:
 
 def _on_hull(h: trimesh.Trimesh, centers: np.ndarray,
              normals: np.ndarray | None = None) -> np.ndarray:
+    """Which triangle centres lie on a hull.
+
+    Args:
+        h: The hull.
+        centers: Triangle centres [mm].
+        normals: Triangle normals; if given, they must agree with the outward
+            normals of the hull.
+
+    Returns:
+        A boolean per centre: within TOL of the hull (and agreeing normal).
+    """
     _, dist, tri = closest_point(h, centers)
     ok = dist < TOL
     if normals is not None:
@@ -43,13 +62,32 @@ def _on_hull(h: trimesh.Trimesh, centers: np.ndarray,
 
 
 def _plate(m: trimesh.Trimesh, face: int) -> trimesh.Trimesh:
-    """Triangle @face extruded FLAT_THICKNESS behind it (against its normal)."""
+    """Extrudes a triangle into a thin plate.
+
+    Args:
+        m: The mesh [mm].
+        face: Index of the triangle.
+
+    Returns:
+        The triangle extruded FLAT_THICKNESS behind it (against its normal).
+    """
     v = m.vertices[m.faces[face]]
     return trimesh.convex.convex_hull(np.vstack([v, v - FLAT_THICKNESS * m.face_normals[face]]))
 
 
 def convex_patches(m: trimesh.Trimesh) -> list[np.ndarray]:
-    """Partition faces of @m into edge-connected patches whose hull they lie on."""
+    """Partitions the faces of a mesh into convex patches.
+
+    Greedy region growing over edge-adjacent triangles, largest first (see the
+    module doc).
+
+    Args:
+        m: The mesh [mm].
+
+    Returns:
+        Face indices of each edge-connected patch whose triangles lie on the
+        hull of its vertices.
+    """
     neighbours = defaultdict(set)
     for a, b in m.face_adjacency:
         neighbours[a].add(b)
@@ -82,8 +120,18 @@ def convex_patches(m: trimesh.Trimesh) -> list[np.ndarray]:
 
 def rebuild_watertight(m: trimesh.Trimesh, scale: float = 1000.0
                        ) -> tuple[trimesh.Trimesh, dict]:
-    """Return a watertight rebuild of @m and a report of the deviation from it.
-    @scale converts the mesh units to mm (the tolerances are in mm)."""
+    """Rebuilds a mesh as a watertight union of convex pieces.
+
+    Args:
+        m: The broken mesh.
+        scale: Factor converting the mesh units to mm (the tolerances are in mm).
+
+    Returns:
+        The watertight solid (in the units of @m) and a report: pieces (number
+        of convex pieces), outside_max_mm (largest distance of the original
+        surface outside the solid), swallowed_frac (fraction of the original
+        surface more than 0.5 mm inside the solid).
+    """
     mm = m.copy()
     mm.apply_scale(scale)
     hulls, flats = [], []

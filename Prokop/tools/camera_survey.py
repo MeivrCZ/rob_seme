@@ -1,17 +1,24 @@
-"""Camera parameters of the CRS93 station for the simulation: resolution, time per
-grab_image and the image delay (age of the image when grab_image returns).
+"""Measures the camera of the CRS93 station for the simulation.
 
-Run from the repo root on the station computer:
-    uv run Prokop/tools/camera_survey.py              # timing only, no motion
-    uv run Prokop/tools/camera_survey.py --delay      # + delay test, moves joint 1
+Resolution, time per grab_image and the image delay (age of the image when
+grab_image returns); experiments E7 and E8 in docs/EXPERIMENTS.md.
 
-The delay test needs the robot homed (by you, this script never homes) and in
+Usage:
+    From the repo root on the station computer::
+
+        uv run Prokop/tools/camera_survey.py              # timing only, no motion
+        uv run Prokop/tools/camera_survey.py --delay      # + delay test, moves the arm
+
+The delay test needs the robot homed (by hand, this script never homes) and in
 q_home. It moves the arm at low speed to a survey pose with the hoop ~50 cm above
-the work area, in the middle of the camera view (pose and the joint path to it
-are checked against the table and the cell model first; keep the work area
-free), swings joint 1 by +15 deg and back at the lowest speed while frames are
-grabbed, and returns to q_home. Output: Prokop/camera_survey/<date-time>/ with
-summary.json, q_home.png, survey.png and the delay CSVs.
+the work area, in the camera view (the pose and the joint paths are checked
+against the table and the cell model first; keep the work area free), swings
+joint 1 by +15 deg and back at the lowest speed while grabbing frames, and
+returns to q_home.
+
+Writes Prokop/experiments/camera_survey/<date-time>/: summary.json (timing,
+survey pose, delay), q_home.png, survey.png, delay_frames.csv (t_grab_return,
+image_change) and delay_states.csv (t_get_q, q1).
 """
 
 import argparse
@@ -37,7 +44,16 @@ MAX_DELAY = 1.0  # s, delays searched in [0, MAX_DELAY]
 
 
 def grab_timing(robot, out: Path) -> dict:
-    """Resolution and time per grab_image (the first call also opens the camera)."""
+    """Measures the image size and the time per grab_image; saves q_home.png.
+
+    Args:
+        robot: CRS93 (or a fake with grab_image).
+        out: Output directory.
+
+    Returns:
+        width, height, channels, first_grab_s (also opens the camera),
+        grab_s_median and grab_s_max of the following calls.
+    """
     import cv2
     durations, img = [], None
     for _ in range(GRABS):
@@ -54,7 +70,14 @@ def grab_timing(robot, out: Path) -> dict:
 
 
 def project(p: np.ndarray) -> np.ndarray:
-    """Pixel (u, v) of the point @p (robot frame) in the modelled camera."""
+    """Projects a point into the modelled camera (cell.CAMERA_T, CAMERA_K).
+
+    Args:
+        p: Point [m], robot base frame.
+
+    Returns:
+        Pixel (u, v).
+    """
     from cell import CAMERA_K, CAMERA_T
     pc = np.linalg.solve(CAMERA_T, [*p, 1.0])[:3]
     uvw = CAMERA_K @ pc
@@ -62,13 +85,26 @@ def project(p: np.ndarray) -> np.ndarray:
 
 
 def survey_pose(robot, checker=None) -> tuple[np.ndarray, dict]:
-    """Start configuration of the joint 1 swing: the flange pointing down over the
-    work area, turned by joint 1 half a swing to the right, so that the swing is
-    centred in the image. The hoop centre stays HOOP_HEIGHT above the table and
-    inside the camera view (IMAGE_MARGIN) at both ends of the swing; clear of the
-    cell and the table by MIN_CLEARANCE in the pose, on the path from q_home and
-    during the swing. Of those, the one needing the smallest joint motion from
-    q_home."""
+    """Finds the start configuration of the joint 1 swing of the delay test.
+
+    Candidates have the flange pointing down over the work area, turned by joint
+    1 half a swing to the right so that the swing is centred in the image. The
+    hoop centre must stay HOOP_HEIGHT above the table and inside the camera view
+    (IMAGE_MARGIN) at both ends of the swing, and the arm MIN_CLEARANCE from the
+    cell and the table in the pose, on the path from q_home and during the swing.
+    Of those, the one needing the smallest joint motion from q_home is chosen.
+
+    Args:
+        robot: CRS93 or CRS93Sim (kinematics, limits).
+        checker: collision.ArmChecker; a new one if None.
+
+    Returns:
+        The configuration [rad] and a summary (q_deg, hoop_center_m,
+        hoop_pixel, clearance_m of the pose and the two paths).
+
+    Raises:
+        RuntimeError: If no candidate satisfies the conditions.
+    """
     from cell import CAMERA_RESOLUTION, TABLE_Z
     from collision import ArmChecker
     checker = checker or ArmChecker()
@@ -113,9 +149,18 @@ def survey_pose(robot, checker=None) -> tuple[np.ndarray, dict]:
 
 def record_out_and_back(robot, q0: np.ndarray | None = None
                         ) -> tuple[np.ndarray, np.ndarray]:
-    """Joint 1 from @q0 (default q_home) to +DELAY_MOVE_DEG and back while
-    alternating grab_image and get_q. Returns frames (t_return, image change) and
-    states (t, q1)."""
+    """Swings joint 1 out by DELAY_MOVE_DEG and back while sampling.
+
+    Alternates grab_image and get_q. The image change is the mean absolute
+    difference to the image before the swing.
+
+    Args:
+        robot: CRS93 or CRS93Sim, standing in @q0.
+        q0: Start configuration [rad]; q_home if None.
+
+    Returns:
+        Frames [t_grab_return, image_change] and states [t_get_q, q1].
+    """
     ref = robot.grab_image().astype(np.int16)
     q0 = (robot.q_home if q0 is None else q0).copy()
     q1 = q0.copy()
@@ -144,12 +189,22 @@ def record_out_and_back(robot, q0: np.ndarray | None = None
 
 
 def estimate_delay(frames: np.ndarray, states: np.ndarray) -> dict:
-    """Delay d at which the image change, plotted against the joint displacement
-    d seconds before the frame returned, is the same on the way out and back.
+    """Estimates the image delay from a swing out and back.
 
-    The image change grows with the displacement in some unknown way, the same in
-    both directions; with a wrong d the out and back branches separate into a
-    loop. d is the minimum of the mismatch over a grid (step 2 ms)."""
+    The image change grows with the joint displacement in some unknown way, the
+    same on the way out and back. Plotted against the displacement d seconds
+    before the frame returned, the out and back branches coincide only for the
+    right d; with a wrong d they separate into a loop. d minimizes the mismatch
+    over a grid of 2 ms steps.
+
+    Args:
+        frames: [t_grab_return, image_change] from record_out_and_back.
+        states: [t_get_q, q1] from record_out_and_back.
+
+    Returns:
+        delay_s, its mismatch, and mismatch_at_0 (no delay) for comparison;
+        mismatch inf if there are not enough frames on each branch.
+    """
     t_q, disp = states[:, 0], np.abs(states[:, 1] - states[0, 1])
     t_img, change = frames[:, 0], frames[:, 1]
     change = (change - change.min()) / max(np.ptp(change), 1e-9)
@@ -174,11 +229,13 @@ def estimate_delay(frames: np.ndarray, states: np.ndarray) -> dict:
 
 
 def _sorted(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Returns @x and @y sorted by @x."""
     k = np.argsort(x)
     return x[k], y[k]
 
 
 def main() -> None:
+    """Runs the timing and, with --delay, the delay test on the real robot."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--delay", action="store_true",
@@ -188,7 +245,8 @@ def main() -> None:
 
     from ctu_crs import CRS93
     robot = CRS93()
-    out = PROKOP / "camera_survey" / datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = (PROKOP / "experiments" / "camera_survey"
+           / datetime.now().strftime("%Y%m%d-%H%M%S"))
     out.mkdir(parents=True)
     summary: dict = {"started": datetime.now().isoformat(timespec="seconds")}
     try:

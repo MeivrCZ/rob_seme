@@ -1,14 +1,16 @@
-"""Convert the STEP models of the hw repo into the STL meshes used by the URDFs.
+"""Converts the STEP models of the hardware repo into the STL meshes of the URDFs.
 
-Run from the repo root (needs the optional `cad` dependency group):
-    uv run --group cad Prokop/tools/step2stl.py [output_dir]   # default Prokop/models/meshes
+Usage:
+    From the repo root (needs the optional `cad` dependency group)::
+
+        uv run --group cad Prokop/tools/step2stl.py [output_dir]   # default Prokop/models/meshes
 
 Meshes keep the STEP-file origin and units (mm); the URDFs scale them by 0.001.
 The base is additionally split into base_plate.stl + base_markers.stl and the hoop
 into hoop_white.stl + hoop_blue.stl for colouring.
 """
 
-import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +38,15 @@ SOURCES = {
 
 
 def convert(src: Path, dst: Path) -> float:
-    """Tessellate STEP @src into binary STL @dst, return the CAD volume [mm^3]."""
+    """Tessellates a STEP model into a binary STL.
+
+    Args:
+        src: The STEP file.
+        dst: The STL file to write.
+
+    Returns:
+        The volume of the CAD solid [mm^3], to compare with the mesh.
+    """
     r = STEPControl_Reader()
     assert r.ReadFile(str(src)) == 1, src
     r.TransferRoots()
@@ -51,10 +61,15 @@ def convert(src: Path, dst: Path) -> float:
 
 
 def split_base_markers(base: Path) -> None:
-    """Split the base plate into the white plate and the black ArUco markers (for
-    colouring only, the URDF collision still uses the whole mesh). The black marker
-    parts are a 0.6 mm relief on top of the plate surface (z = 5.0 .. 5.6 mm); the
-    white marker cells are holes in it down to the plate surface."""
+    """Splits the base mesh into the white plate and the black ArUco markers.
+
+    For colouring only, the URDF collision still uses the whole mesh. The black
+    marker parts are a 0.6 mm relief on top of the plate surface (z = 5.0 .. 5.6
+    mm); the white marker cells are holes in it down to the plate surface.
+
+    Args:
+        base: base.stl; base_plate.stl and base_markers.stl are written next to it.
+    """
     m = trimesh.load(base)
     black = m.triangles_center[:, 2] > 5.0 + 1e-3
     for name, mask in [("base_plate", ~black), ("base_markers", black)]:
@@ -63,13 +78,19 @@ def split_base_markers(base: Path) -> None:
 
 
 def split_hoop_colours(hoop: Path) -> None:
-    """Split the hoop into its two filament colours (for colouring only). The hoop
-    is printed flat (STEP z = -6.6 .. 0 mm) with filament changes at 0.8 mm and
-    5.8 mm (see print_files/hoop_dualcolor_*.gcode, the slicer marks the middle part
-    #4835C7): the 0.8 mm layers on both faces are white, the core is blue (matches
-    the photo of the setup). Faces lying in a filament-change plane (the floors of
-    the 0.8 mm deep ring groove and triangle recess on both faces) are surfaces of
-    the core, so blue. The two closed magnet cavities are dropped."""
+    """Splits the hoop mesh into its two filament colours.
+
+    For colouring only. The hoop is printed flat (STEP z = -6.6 .. 0 mm) with
+    filament changes at 0.8 mm and 5.8 mm (see print_files/hoop_dualcolor_*.gcode,
+    the slicer marks the middle part #4835C7): the 0.8 mm layers on both faces
+    are white, the core is blue (matches the photo of the setup). Faces lying in
+    a filament-change plane (the floors of the 0.8 mm deep ring groove and
+    triangle recess on both faces) are surfaces of the core, so blue. The two
+    closed magnet cavities are dropped.
+
+    Args:
+        hoop: hoop.stl; hoop_white.stl and hoop_blue.stl are written next to it.
+    """
     body = max(trimesh.load(hoop).split(only_watertight=False),
                key=lambda b: len(b.faces))
     slice_ = trimesh.intersections.slice_mesh_plane
@@ -87,8 +108,13 @@ def split_hoop_colours(hoop: Path) -> None:
         hoop.with_name("hoop_blue.stl"))
 
 
-if __name__ == "__main__":
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else PROKOP / "models" / "meshes"
+def main() -> None:
+    """Converts all SOURCES and splits the base and hoop meshes for colouring."""
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("output_dir", nargs="?", type=Path,
+                        default=PROKOP / "models" / "meshes")
+    out = parser.parse_args().output_dir
     out.mkdir(parents=True, exist_ok=True)
     for rel, name in SOURCES.items():
         dst = out / f"{name}.stl"
@@ -99,3 +125,7 @@ if __name__ == "__main__":
         print("   bounds", m.bounds.round(2).tolist())
     split_base_markers(out / "base.stl")
     split_hoop_colours(out / "hoop.stl")
+
+
+if __name__ == "__main__":
+    main()

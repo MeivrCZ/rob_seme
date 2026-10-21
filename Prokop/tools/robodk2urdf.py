@@ -1,7 +1,9 @@
-"""Convert the RoboDK robot file CRS-A465.robot into crs93.urdf + STL meshes.
+"""Converts the RoboDK robot file CRS-A465.robot into crs93.urdf and STL meshes.
 
-Run from the repo root:
-    uv run Prokop/tools/robodk2urdf.py
+Usage:
+    From the repo root::
+
+        uv run Prokop/tools/robodk2urdf.py
 
 Kinematics are taken from ctu_crs (the driver of the real CRS93), so that the URDF
 joint values are exactly the q used by robot.move_to_q() and the URDF "flange" frame
@@ -30,6 +32,7 @@ Relation to ctu_crs (verified numerically by this script):
 
 from __future__ import annotations
 
+import argparse
 import struct
 import zlib
 from pathlib import Path
@@ -64,8 +67,16 @@ EXPECTED_THETA = np.array([0, -np.pi / 2, -np.pi / 2, 0, 0, np.pi])
 
 
 def read_robodk(path: Path) -> tuple[np.ndarray, np.ndarray, list[list[tuple]]]:
-    """Return (dhm [6x4: alpha, a, theta, d in m], limits_deg [6x2], bodies) where
-    bodies[i] is a list of (triangles [n,3,3] in m, rgba)."""
+    """Reads a RoboDK .robot file (format in the module doc).
+
+    Args:
+        path: The .robot file.
+
+    Returns:
+        The modified DH table [6x4: alpha, a, theta, d; m, rad], the joint limits
+        [6x2, deg] and the bodies: per body a list of (triangles [n, 3, 3] in m,
+        rgba).
+    """
     raw = path.read_bytes()
     data = zlib.decompress(raw[4:])
     assert len(data) == int.from_bytes(raw[:4], "big")
@@ -100,7 +111,15 @@ def read_robodk(path: Path) -> tuple[np.ndarray, np.ndarray, list[list[tuple]]]:
 
 
 def ctu_dhm(robot: CRS93, rdk_dhm: np.ndarray) -> np.ndarray:
-    """RoboDK modified-DH table with link lengths replaced by those of ctu_crs."""
+    """Replaces the link lengths of the RoboDK DH table by those of ctu_crs.
+
+    Args:
+        robot: The ctu_crs robot.
+        rdk_dhm: Modified DH table from read_robodk.
+
+    Returns:
+        The DH table with the ctu_crs link lengths.
+    """
     ll = robot.link_lengths  # base height, upper arm, forearm, wrist-flange
     dhm = rdk_dhm.copy()
     dhm[0, 3], dhm[2, 1], dhm[3, 3], dhm[5, 3] = ll[0], ll[1], ll[2], ll[3]
@@ -108,12 +127,25 @@ def ctu_dhm(robot: CRS93, rdk_dhm: np.ndarray) -> np.ndarray:
 
 
 def fmt(v) -> str:
+    """Formats numbers for a URDF attribute ("x y z")."""
     return " ".join(f"{x:.12g}" for x in v)
 
 
 def write_urdf(dhm: np.ndarray, q_min: np.ndarray, q_max: np.ndarray,
                mesh_files: list[list[tuple[str, tuple]]], collision_files: list[str]
                ) -> str:
+    """Builds the URDF text of the robot with its adapter.
+
+    Args:
+        dhm: Modified DH table [m, rad] (ctu_crs link lengths).
+        q_min: Lower joint limits [rad].
+        q_max: Upper joint limits [rad].
+        mesh_files: Per body, the visual mesh files with their rgba colours.
+        collision_files: Per body, the watertight collision mesh file.
+
+    Returns:
+        The URDF document.
+    """
     base_drop = 0.330 - dhm[0, 3]  # RoboDK base frame lies this much below ctu's
     names = ["base_link"] + [f"link{i}" for i in range(1, 7)]
     out = [
@@ -221,6 +253,7 @@ def write_urdf(dhm: np.ndarray, q_min: np.ndarray, q_max: np.ndarray,
 
 
 def main() -> None:
+    """Writes the meshes and the URDF, then verifies them against ctu_crs."""
     rdk_dhm, limits_deg, bodies = read_robodk(SRC)
     assert np.allclose(rdk_dhm[:, 0], EXPECTED_ALPHA), rdk_dhm
     assert np.allclose(rdk_dhm[:, 2], EXPECTED_THETA), rdk_dhm
@@ -267,7 +300,17 @@ def main() -> None:
 
 
 def verify(robot: CRS93) -> None:
-    """URDF flange must equal ctu_crs fk for random configurations."""
+    """Checks the written URDF against ctu_crs.
+
+    The URDF flange must equal ctu_crs fk for random configurations, and in
+    q_home the adapter must be turned as ADAPTER_TURN says.
+
+    Args:
+        robot: The ctu_crs robot.
+
+    Raises:
+        AssertionError: If a check fails.
+    """
     import yourdfpy
 
     urdf = yourdfpy.URDF.load(URDF, mesh_dir=str(MODELS))
@@ -294,4 +337,7 @@ def verify(robot: CRS93) -> None:
 
 
 if __name__ == "__main__":
+    argparse.ArgumentParser(description=__doc__,
+                            formatter_class=argparse.RawDescriptionHelpFormatter
+                            ).parse_args()
     main()
