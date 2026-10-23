@@ -54,3 +54,12 @@ def test_spin_clockwise(viewer, clock):
     a0 = viewer.turntable_angle(clock.t)
     assert viewer.turntable_angle(clock.t + 4.0) == pytest.approx(a0 - np.pi / 2)
     viewer.set_spin(0.0)
+
+
+def test_set_placement(viewer):
+    from placement import Placement
+    viewer.add_turntable_gui(animate=False)
+    p = Placement(np.array([0.5, 0.05]), np.array([0.01, -0.02]), 0.4)
+    viewer.set_placement(p)
+    assert viewer.placement is p
+    assert np.allclose(viewer.gizmo.position[:2], p.turntable_xy)

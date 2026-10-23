@@ -287,6 +287,10 @@ class SceneViewer:
         # whenever the spin settings change.
         self._spin_lock = threading.Lock()
         self._t_ref, self._angle_ref, self._omega = clock(), 0.0, 0.0
+        # Called after the placement or the spin changes (the simulation's
+        # collision monitor re-checks then).
+        self.on_change: list[Callable[[], None]] = []
+        self._spin_box = None
         server = self.server = viser.ViserServer(port=port)
         server.scene.set_up_direction("+z")
         server.initial_camera.position = (1.3, -1.1, 1.0)
@@ -382,17 +386,41 @@ class SceneViewer:
         with self._spin_lock:
             return self._angle_ref + self._omega * (t - self._t_ref)
 
-    def set_spin(self, omega: float) -> None:
-        """Spins the turntable from now on.
+    def set_spin(self, omega: float, t: float | None = None) -> None:
+        """Spins the turntable from now (or from time @t) on.
 
         Args:
             omega: Angular speed [rad/s], counter-clockwise from above positive;
                 0 stops it.
+            t: Clock time from which the new speed holds; default now.
         """
-        t = self.clock()
+        t = self.clock() if t is None else t
         angle = self.turntable_angle(t) % (2 * np.pi)
         with self._spin_lock:
             self._t_ref, self._angle_ref, self._omega = t, angle, omega
+        for callback in self.on_change:
+            callback()
+
+    def stop_spin(self, t: float | None = None) -> None:
+        """Stops the turntable (at clock time @t) and unticks "Spin".
+
+        Args:
+            t: Clock time at which it stops; default now.
+        """
+        self.set_spin(0.0, t)
+        if self._spin_box is not None and self._spin_box.value:
+            self._spin_box.value = False
+
+    def set_placement(self, p: Placement) -> None:
+        """Places the turntable and the base (like the placement buttons).
+
+        For scripts setting up a scenario; the placement is not checked against
+        the placement rules.
+
+        Args:
+            p: The new placement.
+        """
+        self._show_placement(p)
 
     def add_turntable_gui(self, animate: bool = True) -> None:
         """Adds the "Turntable" panel: random placements and spinning.
@@ -420,6 +448,8 @@ class SceneViewer:
 
         def show_placement(p: Placement) -> None:
             self.placement = p
+            for callback in self.on_change:
+                callback()
             T = p.turntable_T()
             self.gizmo.position = T[:3, 3]
             T = p.base_T_top()
@@ -445,6 +475,7 @@ class SceneViewer:
             show_placement(Placement(np.array(self.gizmo.position[:2]),
                                      self.placement.base_xy, self.placement.base_yaw))
 
+        self._show_placement = show_placement
         show_placement(INITIAL_PLACEMENT)
 
         def update_spin(_=None) -> None:
@@ -453,6 +484,7 @@ class SceneViewer:
 
         for control in (spin, direction, period):
             control.on_update(update_spin)
+        self._spin_box = spin
 
         def spin_loop() -> None:
             """Show the turntable top (with the base and puzzle) while it spins."""

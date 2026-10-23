@@ -29,8 +29,20 @@ measured on the CRS93 station (docs/EXPERIMENTS.md):
   The real joints first drive to their home switches on paths the sim does not
   know; nothing is collision checked, so the sim cannot tell whether a pose is
   safe to home from.
-* The gripper is a stub, grab_image is not simulated yet, release, reset_motors
-  and close do nothing.
+* grab_image returns an image rendered from the simulated scene with the
+  camera model (camera.py: pose and intrinsics of cell.py, the attribute
+  camera), with the real timing: it blocks 0.19 s (0.8 s the first time) and
+  shows the scene as it was camera_delay before it returns. The last image is
+  shown in the viewer's "Camera" panel.
+* Hard collisions: a monitor checks the exact meshes (collision.SceneCollider:
+  the arm with itself, with the cell and the table, with the turntable, base
+  and puzzle) along the motion, slightly ahead of the sim clock. On contact the
+  robot stops at the last collision-free configuration, the turntable stops,
+  the colliding bodies turn red and the next robot call raises CollisionError.
+  Until "Release" is pressed in the viewer's "Collision" panel, every motion
+  command raises again (get_q and grab_image still work). Release puts the
+  robot back where the colliding move started.
+* The gripper is a stub; release, reset_motors and close do nothing.
 
 One sim clock (scaled by time_scale) drives the robot, the delays and the
 turntable spin; the render loop shows the whole scene at one instant. Each
@@ -51,6 +63,9 @@ import time
 from dataclasses import dataclass
 
 import numpy as np
+from trimesh import transform_points as trimesh_points
+from camera import Camera, SceneRenderer
+from collision import SceneCollider
 from ctu_crs import CRS93
 from numpy.typing import ArrayLike
 from view_models import SceneViewer
@@ -69,6 +84,18 @@ FIRST_GRAB_TIME = 0.8
 # Queued moves blend if their unit joint-space directions differ by less than this.
 BLEND_TOL = 1e-3
 HISTORY = 1.0  # s, finished moves kept for state queries reaching into the past
+# Collision monitor (sim seconds / metres / radians).
+MONITOR_LOOKAHEAD = 0.15  # s, how far ahead of the clock the motion is checked
+MONITOR_MAX_STEP = 0.25  # s, longest step between checks
+MONITOR_SUBSTEP = 0.01  # s, resolution of the motion bound
+# Max joint change between checks: self-collisions are only possible between
+# bulky parts (>= 4 cm), and 3 deg moves the far edge of the hoop ~1.5 cm.
+MONITOR_JOINT_STEP = np.deg2rad(3.0)
+MONITOR_REFRESH = 0.03  # m, exact distance to a group recomputed below this bound
+MONITOR_MIN_MOVE = 0.002  # m, smallest step even when (nearly) touching
+ARM_REACH = 1.1  # m, bound on the distance of any arm point from any joint axis
+TASK_REACH = 0.15  # m, bound on base + puzzle reach beyond the base offset
+MONITOR_WAIT = 5.0  # s (wall), longest wait of a query for the monitor
 
 
 @dataclass
@@ -133,6 +160,35 @@ def _same_direction(a: np.ndarray, b: np.ndarray) -> bool:
     """
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
     return bool(na > 0 and nb > 0 and np.linalg.norm(a / na - b / nb) < BLEND_TOL)
+
+
+class CollisionError(RuntimeError):
+    """The simulated robot hit something (hard collision) and stopped.
+
+    Attributes:
+        time: Sim time of the contact [s].
+        hits: Colliding pairs (arm part, other body).
+        q_stop: Configuration the robot stopped in [rad].
+        q_start: Start of the colliding move, where Release puts the robot [rad].
+    """
+
+    def __init__(self, message: str, record: "_Collision"):
+        super().__init__(message)
+        self.time = record.t
+        self.hits = record.hits
+        self.q_stop = record.q_stop
+        self.q_start = record.q_start
+
+
+@dataclass
+class _Collision:
+    """A detected collision: contact at @t, the robot frozen from @t_free on."""
+
+    t: float
+    t_free: float
+    hits: list
+    q_stop: np.ndarray
+    q_start: np.ndarray
 
 
 class SimGripper:
@@ -204,8 +260,10 @@ class CRS93Sim(CRS93):
         send_delay: How long move_to_q blocks [s].
         query_delay: Round trip of get_q [s].
         status_delay: Round trip of in_motion / wait_for_motion_stop [s].
-        camera_delay: Age of the image when grab_image returns [s] (for the
-            simulated camera, not used yet).
+        camera_delay: Age of the image when grab_image returns [s].
+        camera: Camera model grab_image renders with (pose, intrinsics); change
+            it to test perception against a camera that differs from its
+            calibration.
     """
 
     def __init__(self, tty_dev: str | None = "/dev/mars", baudrate: int = 19200, *,
@@ -215,7 +273,8 @@ class CRS93Sim(CRS93):
                  send_delay: float = SEND_DELAY,
                  query_delay: float = QUERY_DELAY,
                  status_delay: float = STATUS_DELAY,
-                 camera_delay: float = CAMERA_DELAY):
+                 camera_delay: float = CAMERA_DELAY,
+                 collisions: bool = True):
         """Starts the simulated robot and its viewer.
 
         The positional arguments are those of CRS93; the keyword-only ones exist
@@ -236,6 +295,9 @@ class CRS93Sim(CRS93):
             query_delay: See the class attributes.
             status_delay: See the class attributes.
             camera_delay: See the class attributes.
+            collisions: Monitor hard collisions (stop, CollisionError). Off
+                for runs far faster than real time (time_scale >> 1) that do
+                not need it: the monitor would slow them down.
         """
         super().__init__(tty_dev=None, baudrate=baudrate)
         self.gripper = SimGripper(self.gripper.bounds, self.gripper._axis)
@@ -246,17 +308,36 @@ class CRS93Sim(CRS93):
         self.query_delay = query_delay
         self.status_delay = status_delay
         self.camera_delay = camera_delay
+        self.camera = Camera()
+        self._camera_opened: set[int] = set()  # threads that called grab_image
         self._lock = threading.Lock()
+        self._running = True  # the threads run until stop()
         self._segments: list[Segment] = []
         self._q_rest = np.array(self.q_home if q0 is None else q0, dtype=float)
         self._speed = self._default_speed_irc256_per_ms.astype(float)
         self._acceleration = self._default_acceleration_irc_per_ms.astype(float)
 
         self.viewer = SceneViewer(port, clock=self._now)  # one clock for the scene
+        self._renderer = SceneRenderer(self.viewer.task, self.camera)
+        self._renderer.prepare()  # OpenGL context of the creating thread (~0.6 s)
+        # Hard collision monitor: everything up to _checked is collision free.
+        self._collider = SceneCollider(self.viewer.task)
+        self._collision: _Collision | None = None
+        self._collision_reported = False
+        self._checked = self._now()
+        self._last_free = self._checked  # time of the last collision-free check
+        self._dirty = True
+        self._red: list = []  # red overlays of colliding bodies
+        self.viewer.on_change.append(self._recheck)
         self._add_status_gui()
         self.viewer.add_turntable_gui(animate=False)  # rendered by _render_loop
         self.viewer.show_q(self._q_rest)
         threading.Thread(target=self._render_loop, daemon=True).start()
+        self._collisions_on = collisions
+        if collisions:
+            threading.Thread(target=self._monitor_loop, daemon=True).start()
+        else:
+            self._collision_text.content = "collision checking off"
         print(f"Simulation: open http://localhost:{self.viewer.server.get_port()}")
         if keep_alive:
             atexit.register(self._keep_alive)
@@ -275,6 +356,8 @@ class CRS93Sim(CRS93):
     def _q_at(self, t: float) -> np.ndarray:
         """Returns the configuration [rad] at sim time @t (not older than HISTORY)."""
         with self._lock:
+            if self._collision is not None and t >= self._collision.t_free:
+                return self._collision.q_stop.copy()
             q = self._q_rest
             for seg in self._segments:
                 if t < seg.t0:
@@ -287,12 +370,17 @@ class CRS93Sim(CRS93):
     def _in_motion_at(self, t: float) -> bool:
         """Whether a move runs or is queued (also not started yet) at sim time @t."""
         with self._lock:
+            if self._collision is not None and t >= self._collision.t_free:
+                return False
             return bool(self._segments) and self._segments[-1].t_end > t
 
     def _motion_end(self) -> float:
         """Returns the end of the queued motion on the sim clock (-inf if none)."""
         with self._lock:
-            return self._segments[-1].t_end if self._segments else -np.inf
+            end = self._segments[-1].t_end if self._segments else -np.inf
+            if self._collision is not None:
+                end = min(end, self._collision.t_free)
+            return end
 
     def _joint_limits_rad(self) -> tuple[np.ndarray, np.ndarray]:
         """Converts the speed and acceleration settings to joint units.
@@ -349,10 +437,11 @@ class CRS93Sim(CRS93):
                     last.q_to - last.q_from, q_to - q_from):
                 T, tau = self._profile(q_to - last.q_from)
                 self._segments[-1] = Segment(last.t0, T, tau, last.q_from, q_to)
-                return
-            t0 = max(arrival, last.t_end) if last else arrival
-            T, tau = self._profile(q_to - q_from)
-            self._segments.append(Segment(t0, T, tau, q_from.copy(), q_to))
+            else:
+                t0 = max(arrival, last.t_end) if last else arrival
+                T, tau = self._profile(q_to - q_from)
+                self._segments.append(Segment(t0, T, tau, q_from.copy(), q_to))
+        self._recheck()
 
     def _stop(self) -> None:
         """Stops at the current configuration and drops the queued motion."""
@@ -360,16 +449,262 @@ class CRS93Sim(CRS93):
         with self._lock:
             self._segments.clear()
             self._q_rest = q
+        self._recheck()
+
+    # --- hard collisions ---
+
+    def _recheck(self) -> None:
+        """Re-checks from now on (the motion, placement or spin changed)."""
+        self._checked = min(self._checked, self._now())
+        self._dirty = True
+
+    def _await_checked(self, t: float) -> None:
+        """Waits until the collision monitor has checked the scene up to sim time
+        @t, so that no state is reported that a collision would still change.
+
+        Only matters when the monitor falls behind the clock (time_scale > 1 or
+        a slow computer); gives up after MONITOR_WAIT seconds of wall time.
+
+        Args:
+            t: Sim time.
+        """
+        if not self._collisions_on:
+            return
+        deadline = time.monotonic() + MONITOR_WAIT
+        while (self._checked < t and self._collision is None
+               and time.monotonic() < deadline):
+            time.sleep(0.002)
+
+    def _guard(self, motion: bool) -> None:
+        """Raises CollisionError after a collision.
+
+        Once for any call (the first one after the robot stopped), and for every
+        motion command until Release is pressed.
+
+        Args:
+            motion: Whether the caller commands motion.
+
+        Raises:
+            CollisionError: As described.
+        """
+        record = self._collision
+        if record is None or self._now() < record.t_free:
+            return
+        if not self._collision_reported:
+            self._collision_reported = True
+            pairs = ", ".join(f"{a}-{b}" for a, b in record.hits)
+            raise CollisionError(
+                f"collision at t = {record.t:.2f} s: {pairs}. The robot stopped at "
+                f"q = {np.rad2deg(record.q_stop).round(1)} deg. Press 'Release' in "
+                "the viewer ('Collision' panel): the robot then goes back to the "
+                "start of the colliding move.", record)
+        if motion:
+            raise CollisionError("the robot is stopped after a collision; press "
+                                 "'Release' in the viewer first", record)
+
+    def _motion_bound(self, t0: float, t1: float) -> tuple[float, float]:
+        """Bounds of the motion between @t0 and @t1.
+
+        Returns:
+            The largest distance any arm or task point can have moved [m] and
+            the largest single joint change [rad].
+        """
+        omega = abs(self.viewer._omega)
+        reach = np.linalg.norm(self.viewer.placement.base_xy) + TASK_REACH
+        moved, joint = 0.0, 0.0
+        q_prev = self._q_at(t0)
+        q_ref = q_prev
+        t = t0
+        while t < t1:
+            t_next = min(t + MONITOR_SUBSTEP, t1)
+            q = self._q_at(t_next)
+            moved += ARM_REACH * np.abs(q - q_prev).sum() + omega * reach * (t_next - t)
+            joint = max(joint, float(np.abs(q - q_ref).max()))
+            q_prev, t = q, t_next
+        return moved, joint
+
+    def _next_check(self, t: float, clearance: float, horizon: float) -> float:
+        """Next time to check: the arm and the task cannot have moved more than
+        @clearance (but at least MONITOR_MIN_MOVE), no joint more than
+        MONITOR_JOINT_STEP.
+
+        Args:
+            t: Time of the last check.
+            clearance: Clearance found there [m].
+            horizon: Latest time to check up to.
+
+        Returns:
+            The next time.
+        """
+        limit = max(clearance, MONITOR_MIN_MOVE)
+        t_next = min(t + MONITOR_MAX_STEP, horizon)
+        lo, hi = t, t_next
+        moved, joint = self._motion_bound(t, hi)
+        if moved <= limit and joint <= MONITOR_JOINT_STEP:
+            return hi
+        for _ in range(12):  # bisection on the bound
+            mid = (lo + hi) / 2
+            moved, joint = self._motion_bound(t, mid)
+            if moved <= limit and joint <= MONITOR_JOINT_STEP:
+                lo = mid
+            else:
+                hi = mid
+        return max(lo, t + 1e-4)
+
+    def _monitor_loop(self) -> None:
+        """Checks the scene for hard collisions, slightly ahead of the clock.
+
+        Steps through the motion so that between two checks nothing can move
+        further than the clearance found (or than MONITOR_JOINT_STEP in a joint,
+        for self-collisions). The exact distance to the cell and to the task
+        objects is recomputed only when its lower bound (last distance minus
+        the motion since) drops below MONITOR_REFRESH.
+        """
+        last_state = None
+        bounds = {}  # obstacle group -> lower bound of the clearance [m]
+        q_self = None  # configuration of the last self-collision check
+        while self._running:
+            try:
+                if self._collision is not None:
+                    time.sleep(0.02)
+                    continue
+                now = self._now()
+                horizon = now + MONITOR_LOOKAHEAD
+                t = self._checked
+                if t >= horizon:
+                    time.sleep(0.01)
+                    continue
+                q = self._q_at(t)
+                angle = self.viewer.turntable_angle(t)
+                state = (q.tobytes(), round(angle, 9), id(self.viewer.placement))
+                if self._dirty:
+                    self._dirty = False
+                    bounds.clear()
+                    q_self = None
+                elif state == last_state:
+                    # Nothing moved since the last check.
+                    moving = self.viewer._omega != 0.0 or self._in_motion_at(t)
+                    self._checked = t + (MONITOR_SUBSTEP if moving else horizon - t)
+                    continue
+                last_state = state
+                collider = self._collider
+                collider.place(q, self.viewer.placement, angle)
+                hits = []
+                if q_self is None or not np.array_equal(q, q_self):
+                    hits += collider.placed_self_hits()
+                    q_self = q
+                table_hits, clearance = collider.placed_table()
+                hits += table_hits
+                for group in ("cell", "task"):
+                    if bounds.get(group, -1.0) < MONITOR_REFRESH:
+                        group_hits, bounds[group] = collider.placed_group(group)
+                        hits += group_hits
+                    clearance = min(clearance, bounds[group])
+                if hits:
+                    self._on_collision(t, sorted(set(hits)))
+                    continue
+                self._last_free = t
+                if self._dirty:  # changed meanwhile: check again from there
+                    continue
+                # The step may reach beyond the horizon (a change of the motion
+                # or the scene rewinds the check anyway); the horizon only
+                # decides when to wait for the clock.
+                t_next = self._next_check(t, clearance, t + MONITOR_MAX_STEP)
+                moved, _ = self._motion_bound(t, t_next)
+                for group in bounds:
+                    bounds[group] -= moved
+                self._checked = t_next
+            except Exception as e:  # keep monitoring whatever happens
+                print(f"collision monitor: {e!r}")
+                time.sleep(0.1)
+
+    def _on_collision(self, t: float, hits: list) -> None:
+        """Stops everything at the last collision-free time before @t.
+
+        Args:
+            t: Sim time of the first colliding check.
+            hits: Colliding pairs.
+        """
+        t_free = min(self._last_free, t)
+        q_stop = self._q_at(t_free)
+        q_start = q_stop
+        with self._lock:
+            for seg in self._segments:
+                if seg.t0 <= t < seg.t_end:
+                    q_start = seg.q_from.copy()
+            self._collision = _Collision(t, t_free, hits, q_stop, q_start)
+            self._collision_reported = False
+        self.viewer.stop_spin(t_free)
+        self._show_collision(hits)
+        pairs = ", ".join(f"{a}-{b}" for a, b in hits)
+        print(f"COLLISION at t = {t:.2f} s: {pairs}; robot stopped, press Release")
+
+    def _show_collision(self, hits: list) -> None:
+        """Draws the colliding bodies red and enables Release."""
+        server = self.viewer.server
+        names = sorted({name for pair in hits for name in pair})
+        with server.atomic():
+            for name in names:
+                mesh, T = self._collider.body(name)
+                vertices = trimesh_points(mesh.vertices + 0.001 * mesh.vertex_normals, T)
+                self._red.append(server.scene.add_mesh_simple(
+                    f"/collision/{name}", vertices, mesh.faces,
+                    color=(0.9, 0.1, 0.1), opacity=0.75))
+        self._collision_text.content = (
+            "**COLLISION** at t = {:.2f} s  \n".format(self._collision.t)
+            + "  \n".join(f"{a} - {b}" for a, b in hits)
+            + "  \nrobot and turntable stopped")
+        self._release_button.disabled = False
+
+    def _release(self) -> None:
+        """Release button: clears the stop, robot back to the colliding move's start."""
+        record = self._collision
+        if record is None:
+            return
+        with self._lock:
+            self._segments.clear()
+            self._q_rest = record.q_start.copy()
+            self._collision = None
+            self._collision_reported = False
+        for handle in self._red:
+            handle.remove()
+        self._red.clear()
+        self._collision_text.content = "no collision"
+        self._release_button.disabled = True
+        self._recheck()
 
     # --- CRSRobot interface ---
 
     def grab_image(self, timeout=10000):
-        """Not simulated yet.
+        """Renders the camera image of the simulated scene.
 
-        Raises:
-            NotImplementedError: Always.
+        Timing as measured on the station: the call blocks GRAB_TIME
+        (FIRST_GRAB_TIME on the first call, which opens the camera) and the image
+        shows the scene (robot, turntable angle) as it was camera_delay before
+        the call returns.
+
+        Args:
+            timeout: Ignored (grab timeout of the real camera [ms]).
+
+        Returns:
+            Image (1200, 1920, 3), BGR uint8, like the real grab_image.
         """
-        raise NotImplementedError("CRS93Sim: the camera is not simulated yet")
+        self._guard(motion=False)
+        t_call = self._now()
+        first = threading.get_ident() not in self._camera_opened
+        self._camera_opened.add(threading.get_ident())
+        renderer = self._renderer
+        renderer.camera = self.camera
+        renderer.prepare()  # OpenGL context of this thread, on its first call
+        t_return = t_call + (FIRST_GRAB_TIME if first else GRAB_TIME)
+        t_image = t_return - self.camera_delay
+        self._sleep(t_image - self._now())
+        self._await_checked(t_image)
+        image = renderer.render(self._q_at(t_image), self.viewer.placement,
+                                self.viewer.turntable_angle(t_image))
+        self._camera_view.image = image[::4, ::4, ::-1]  # RGB, 480 x 300
+        self._sleep(t_return - self._now())
+        return image
 
     def release(self):
         """Does nothing (the real one releases errors of the control unit)."""
@@ -378,7 +713,18 @@ class CRS93Sim(CRS93):
         """Does nothing (the real one resets the motors)."""
 
     def close(self):
-        """Does nothing (the real one closes the serial connection)."""
+        """Does nothing (the real one closes the serial connection).
+
+        The simulated robot and its viewer keep running (see stop()).
+        """
+
+    def stop(self) -> None:
+        """Ends the simulation: its threads and the viewer (simulation only).
+
+        For scripts and tests that make several CRS93Sim in one process.
+        """
+        self._running = False
+        self.viewer.server.stop()
 
     def initialize(self, home: bool = True):
         """Stops any motion, sets the default speed and acceleration, homes.
@@ -387,6 +733,7 @@ class CRS93Sim(CRS93):
             home: Hard home and soft home (to q_home) afterwards, as the real
                 robot does.
         """
+        self._guard(motion=True)
         self._stop()
         self.set_speed(self._default_speed_irc256_per_ms)
         self.set_acceleration(self._default_acceleration_irc_per_ms)
@@ -427,6 +774,7 @@ class CRS93Sim(CRS93):
         Raises:
             ValueError: If the robot parameters define no hard home sequence.
         """
+        self._guard(motion=True)
         self.set_speed(self._default_speed_irc256_per_ms)
         self.set_acceleration(self._default_acceleration_irc_per_ms)
         if len(self._hh_sequence) == 0:
@@ -442,17 +790,23 @@ class CRS93Sim(CRS93):
 
     def soft_home(self):
         """Moves to q_home and waits."""
+        self._guard(motion=True)
         self._enqueue(self.q_home)
         self.wait_for_motion_stop()
 
     def move_to_q(self, q: ArrayLike):
         """Queues a coordinated move to @q; blocks only for send_delay.
 
+        The move blends into the queued one if it continues in exactly the same
+        joint-space direction (from that move's target), else it starts from
+        standstill when that one ends.
+
         Args:
             q: Target configuration [rad].
         """
         assert self._initialized, "You need to initialize the robot before moving it."
         assert self.in_limits(q), "Joint limits violated."
+        self._guard(motion=True)
         self._enqueue(q)
         self._sleep(self.send_delay)
 
@@ -462,8 +816,11 @@ class CRS93Sim(CRS93):
         Returns:
             The configuration [rad] at the middle of the round trip.
         """
+        self._guard(motion=False)
         t = self._now() + self.query_delay / 2  # the unit answers here
         self._sleep(self.query_delay)
+        self._await_checked(t)
+        self._guard(motion=False)
         return self._q_at(t)
 
     def in_motion(self) -> bool:
@@ -472,8 +829,11 @@ class CRS93Sim(CRS93):
         Returns:
             Whether a move runs or is queued at the middle of the round trip.
         """
+        self._guard(motion=False)
         t = self._now() + self.status_delay / 2
         self._sleep(self.status_delay)
+        self._await_checked(t)
+        self._guard(motion=False)
         return self._in_motion_at(t)
 
     def wait_for_motion_stop(self):
@@ -484,10 +844,16 @@ class CRS93Sim(CRS93):
         """
         t_return = self._now() + self.status_delay
         while True:
-            dt = max(t_return, self._motion_end() + self.status_delay / 2) - self._now()
+            self._guard(motion=False)  # raises if a collision stops the motion
+            end = max(t_return, self._motion_end() + self.status_delay / 2)
+            dt = end - self._now()
             if dt <= 0:
-                break
-            self._sleep(dt)
+                self._await_checked(end)
+                self._guard(motion=False)
+                if self._motion_end() + self.status_delay / 2 <= end:
+                    break
+                continue
+            self._sleep(min(dt, 0.05))
 
     # --- viewer ---
 
@@ -495,11 +861,22 @@ class CRS93Sim(CRS93):
         """Adds the "CRS93 simulation" status panel to the viewer."""
         with self.viewer.server.gui.add_folder("CRS93 simulation"):
             self._status = self.viewer.server.gui.add_markdown("")
+        with self.viewer.server.gui.add_folder("Collision"):
+            self._collision_text = self.viewer.server.gui.add_markdown("no collision")
+            self._release_button = self.viewer.server.gui.add_button(
+                "Release", disabled=True,
+                hint="Clears the stop; the robot goes back to the start of the "
+                     "colliding move")
+            self._release_button.on_click(lambda _: self._release())
+        with self.viewer.server.gui.add_folder("Camera"):
+            self._camera_view = self.viewer.server.gui.add_image(
+                np.full((300, 480, 3), 200, np.uint8), label="last grab_image",
+                format="jpeg")
 
     def _render_loop(self) -> None:
         """Shows the whole scene at the current sim time, RENDER_FPS times a second."""
         shown = None
-        while True:
+        while self._running:
             now = self._now()
             q = self._q_at(now)
             moved = shown is None or not np.array_equal(q, shown)
@@ -507,9 +884,10 @@ class CRS93Sim(CRS93):
             shown = q
             with self._lock:
                 queued = sum(seg.t_end > now for seg in self._segments)
+            flange = np.array2string(self.fk(q)[:3, 3], precision=3, suppress_small=True)
             self._status.content = (
                 f"q [deg]: {np.array2string(np.rad2deg(q), precision=1)}  \n"
-                f"flange xyz [m]: {np.array2string(self.fk(q)[:3, 3], precision=3)}  \n"
+                f"flange xyz [m]: {flange}  \n"
                 f"initialized: {self._initialized}, "
                 f"in motion: {self._in_motion_at(now)}, queued moves: {queued}")
             time.sleep(1 / RENDER_FPS)
@@ -521,7 +899,10 @@ class CRS93Sim(CRS93):
         until Ctrl+C.
         """
         try:
-            self.wait_for_motion_stop()
+            try:
+                self.wait_for_motion_stop()
+            except CollisionError as e:
+                print(f"CollisionError: {e}")
             print("Script finished, simulation still open (Ctrl+C to quit)")
             while True:
                 time.sleep(1.0)

@@ -1,4 +1,4 @@
-# Notes for the team (2026-10-20, updated 2026-10-21)
+# Notes for the team (2026-10-20, updated 2026-10-23)
 
 ## Vojtěch: changes in Prokop/ that affect your current code
 
@@ -34,3 +34,37 @@ are rewriting it anyway, here is what changed:
   `Prokop/docs/MEASUREMENTS.md` and `Prokop/docs/EXPERIMENTS.md`; the cell
   geometry and the camera model (pose, estimated intrinsics) are importable from
   `Prokop/cell.py`.
+
+## Vojtěch: simulated camera (2026-10-23)
+
+`CRS93Sim.grab_image()` now returns a rendered camera image: 1920 x 1200 BGR
+uint8 like the real one, with the real timing (blocks ~0.19 s, the image is
+~0.11 s old). The base markers are the real ones (`DICT_4X4_50`, ids 1 and 2),
+so your ArUco detection can run on it unchanged. Flat colours, no noise: good
+for testing the pipeline's logic, not for tuning detection. Details in
+`Prokop/README.md`.
+
+## Everyone: hard collisions in the simulation (2026-10-23)
+
+`CRS93Sim` now stops on a collision of the exact meshes (arm with itself, the
+cell, the table, the turntable, base and puzzle; the hoop touching the puzzle
+counts). The robot and turntable stop, the bodies turn red, and the next robot
+call raises `simulation.CollisionError`; catch it if your script should go on.
+Motion commands keep raising until someone presses **Release** in the viewer
+("Collision" panel), which puts the robot back where the colliding move
+started. On the real robot there is no such check: a collision there is a crash.
+
+## Natka: how queued moves blend (2026-10-23)
+
+The robot (and `CRS93Sim`, E6 in `Prokop/docs/EXPERIMENTS.md`) blends a queued
+move into the previous one only if it continues in exactly the same
+joint-space direction; at any corner or reversal it (nearly) stops first.
+
+- What counts is joint space: a path curved in Cartesian space runs without
+  stopping if it is a straight line in joint space (`q0 + s * d`). Via points on
+  such a line add nothing; send the end point as one move.
+- Chain moves from the previous target, not from `get_q()`, which returns the
+  configuration mid-move: `move_to_q(q + d1)` then `move_to_q(q + d1 + d2)`.
+  With `get_q() + d2` the second move bends or reverses relative to the first
+  and starts from standstill.
+- The second command has to arrive before the first move starts braking.

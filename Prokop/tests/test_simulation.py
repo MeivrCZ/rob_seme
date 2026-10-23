@@ -12,8 +12,10 @@ IRC_TOL = 1e-4  # rad, targets are rounded to IRC like the real commands
 
 
 def make_sim(**kwargs) -> CRS93Sim:
+    """A fast sim without the collision monitor (it is tested on its own in
+    test_collision_monitor.py and would slow the runs at TIME_SCALE)."""
     return CRS93Sim(port=free_port(), time_scale=TIME_SCALE, keep_alive=False,
-                    **kwargs)
+                    collisions=False, **kwargs)
 
 
 @pytest.fixture(scope="module")
@@ -21,7 +23,7 @@ def sim():
     s = make_sim()
     s.initialize(home=False)
     yield s
-    s.viewer.server.stop()
+    s.stop()
 
 
 @pytest.fixture
@@ -78,7 +80,7 @@ def test_move_before_initialize():
         with pytest.raises(AssertionError):
             s.move_to_q(s.q_home)
     finally:
-        s.viewer.server.stop()
+        s.stop()
 
 
 def test_hard_home_ends_at_measured_pose():
@@ -89,7 +91,7 @@ def test_hard_home_ends_at_measured_pose():
         assert np.allclose(np.rad2deg(s.get_q()),
                            [163.4, 0.3, -56.0, 176.7, 14.9, -172.0], atol=0.15)
     finally:
-        s.viewer.server.stop()
+        s.stop()
 
 
 def test_initialize_homes_to_q_home():
@@ -99,7 +101,7 @@ def test_initialize_homes_to_q_home():
         assert not s.in_motion()
         assert np.allclose(s.get_q(), s.q_home, atol=IRC_TOL)
     finally:
-        s.viewer.server.stop()
+        s.stop()
 
 
 # --- motion ---
@@ -172,7 +174,7 @@ def realtime():
     s = CRS93Sim(port=free_port(), time_scale=1.0, keep_alive=False)
     s.initialize(home=False)
     yield s
-    s.viewer.server.stop()
+    s.stop()
 
 
 def test_same_direction_moves_blend(realtime):
@@ -246,9 +248,41 @@ def test_beyond_limit_rejected(stopped, j, side):
 
 # --- stubs ---
 
-def test_grab_image_not_simulated(stopped):
-    with pytest.raises(NotImplementedError):
-        stopped.grab_image()
+def test_grab_image_format(stopped):
+    image = stopped.grab_image()
+    assert image.shape == (1200, 1920, 3) and image.dtype == np.uint8
+
+
+def test_grab_image_timing_and_age():
+    """Real-time sim: the first call blocks ~FIRST_GRAB_TIME, later ones
+    ~GRAB_TIME; the image shows the robot as it was camera_delay before the
+    call returned (here during a slow joint 1 move)."""
+    from simulation import CAMERA_DELAY, FIRST_GRAB_TIME, GRAB_TIME
+    s = CRS93Sim(port=free_port(), time_scale=1.0, keep_alive=False)
+    try:
+        s.initialize(home=False)
+        seen = []
+        t = s._now()
+        s.grab_image()
+        first = s._now() - t
+        renderer = s._renderer
+        render = renderer.render
+        renderer.render = lambda q, *a: seen.append(np.array(q)) or render(q, *a)
+        s.set_speed_relative(0.0)
+        s.move_to_q(s.q_home + np.deg2rad([20, 0, 0, 0, 0, 0]))
+        s._sleep(1.0)  # well into the move
+        t = s._now()
+        s.grab_image()
+        t_return = s._now()
+        # The first call also pays the first render while the collision
+        # monitor runs: up to ~0.15 s late (the real one was measured once).
+        assert first == pytest.approx(FIRST_GRAB_TIME, abs=0.25)
+        assert t_return - t == pytest.approx(GRAB_TIME, abs=0.06)
+        expected = s._q_at(t_return - CAMERA_DELAY)
+        speed = np.deg2rad(6)  # j1 at the lowest speed setting, ~5 deg/s
+        assert abs(seen[-1][0] - expected[0]) < speed * 0.03
+    finally:
+        s.stop()
 
 
 def test_gripper_stub(stopped):
