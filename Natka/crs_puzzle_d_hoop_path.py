@@ -31,6 +31,8 @@ HOOP_OUTER_DIAMETER = 67.2
 HOOP_THICKNESS = 6.6
 HOOP_RING_TO_MOUNT_DISTANCE = 135.0
 
+# All the points are in the reference coordinate system
+# might need to be transformed to the robot coordinate system before sending to the robot
 
 def profile_points() -> list[tuple[float, float, float]]:
     """Return ring-center points from D's open end down toward its base."""
@@ -48,7 +50,14 @@ def profile_points() -> list[tuple[float, float, float]]:
         )
 
     # The lower 45-degree jog and stem follow the dimensions on drawing page 4.
-    points.extend([(-15.0, 0.0, 45.0), (0.0, 0.0, 30.0), (0.0, 0.0, BASE_STOP_Z)])
+    points.extend(
+        [
+            (-15.0, 0.0, 45.0),
+            (0.0, 0.0, 30.0),
+            (0.0, 0.0, 25.0),
+            (0.0, 0.0, BASE_STOP_Z),
+        ]
+    )
     return points
 
 

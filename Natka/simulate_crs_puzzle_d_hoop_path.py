@@ -67,6 +67,10 @@ class IncompletePathPlanning(RuntimeError):
         self.path = list(path)
 
 
+class StartingWaypointUnreachable(RuntimeError):
+    """Raised when no reachable hoop-center position is found around waypoint 0."""
+
+
 @dataclass
 class PathPlanningState:
     """Orientation recovery state retained between incremental planning calls."""
@@ -104,6 +108,99 @@ def farthest_viable_placement(robot: CRS93Sim) -> Placement:
     if not candidates:
         raise RuntimeError("No viable work-area corner placement was found.")
     return max(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+def waypoint_zero_reachable_placement(
+    robot: CRS93Sim,
+    turntable_xy: np.ndarray | None = None,
+) -> Placement:
+    """Find a viable placement with reachable waypoint 0.
+
+    If ``turntable_xy`` is provided, only that camera-visible location is
+    considered; otherwise, the work area is searched.
+    """
+    task = robot.viewer.task
+    points = profile_points()
+    if turntable_xy is not None:
+        requested_xy = np.asarray(turntable_xy, dtype=float)
+        if requested_xy.shape != (2,):
+            raise ValueError("turntable_xy must contain exactly two coordinates.")
+        if not np.all(
+            (requested_xy >= WORK_AREA_XY[:, 0])
+            & (requested_xy <= WORK_AREA_XY[:, 1])
+        ):
+            raise ValueError(
+                f"Requested placement {requested_xy.tolist()} is outside "
+                "the camera-visible work area."
+            )
+        turntable_positions = [requested_xy]
+    else:
+        interval = 0.025
+        x_values = np.linspace(
+            WORK_AREA_XY[0, 0],
+            WORK_AREA_XY[0, 1],
+            math.ceil(np.ptp(WORK_AREA_XY[0]) / interval) + 1,
+        )
+        y_values = np.linspace(
+            WORK_AREA_XY[1, 0],
+            WORK_AREA_XY[1, 1],
+            math.ceil(np.ptp(WORK_AREA_XY[1]) / interval) + 1,
+        )
+        turntable_positions = sorted(
+            (np.array([x, y], dtype=float) for x in x_values for y in y_values),
+            key=lambda xy: (xy[0], abs(xy[1]), xy[1]),
+        )
+    base_yaws = (math.pi, 0.0, math.pi / 2.0, -math.pi / 2.0)
+    waypoint_zero_reachable = 0
+    clearance_rejected = 0
+
+    for turntable_xy in turntable_positions:
+        for base_yaw in base_yaws:
+            placement = Placement(turntable_xy, np.zeros(2), base_yaw)
+            if (
+                not in_cage(placement.turntable_xy, task.turntable_radius)
+                or task.stability_margin(placement) < STABILITY_MARGIN
+            ):
+                continue
+
+            robot.viewer.set_placement(placement)
+            try:
+                solve_path(
+                    robot,
+                    flange_targets(robot, points),
+                    points,
+                    start_index=0,
+                    end_index=1,
+                )
+            except StartingWaypointUnreachable:
+                continue
+
+            waypoint_zero_reachable += 1
+            clearance = task.clearance_to_robot(placement)
+            if clearance < MIN_CLEARANCE:
+                clearance_rejected += 1
+                continue
+
+            print(
+                "Selected a viable placement with reachable waypoint 0: "
+                f"xy=({turntable_xy[0]:.3f}, {turntable_xy[1]:.3f}) m, "
+                f"base yaw={math.degrees(base_yaw):.0f} degrees, "
+                f"minimum clearance={clearance * 1000.0:.1f} mm."
+            )
+            return placement
+
+    requested_location = (
+        f" at {turntable_positions[0].tolist()}"
+        if turntable_xy is not None
+        else ""
+    )
+    raise RuntimeError(
+        "No viable camera-visible placement with a reachable waypoint 0 was "
+        f"found{requested_location} after checking "
+        f"{len(turntable_positions) * len(base_yaws)} position and orientation "
+        f"combinations ({waypoint_zero_reachable} passed waypoint-0 IK, "
+        f"{clearance_rejected} failed the clearance requirement)."
+    )
 
 
 def rotation_x(angle: float) -> np.ndarray:
@@ -487,6 +584,36 @@ def compose_tilt_transform(
     return transform
 
 
+def starting_waypoint_ring(
+    points: Sequence[tuple[float, float, float]],
+) -> list[np.ndarray]:
+    """Sample waypoint-0 center positions around its base-local nominal point.
+
+    The nominal point is transformed by the current camera-estimated puzzle
+    pose. Offsets span concentric rings in the plane normal to the entry path,
+    within the hoop's available centerline clearance.
+    """
+    start = np.asarray(points[0], dtype=float)
+    tangent = np.asarray(points[1], dtype=float) - start
+    tangent /= np.linalg.norm(tangent)
+    across = np.array([0.0, 1.0, 0.0])
+    normal = np.cross(tangent, across)
+    normal /= np.linalg.norm(normal)
+
+    offsets = [np.zeros(3)]
+    radii = list(np.arange(2.0, MAX_CENTER_DEVIATION_MM, 2.0))
+    if not np.isclose(MAX_CENTER_DEVIATION_MM % 2.0, 0.0):
+        radii.append(MAX_CENTER_DEVIATION_MM)
+    for radius in radii:
+        for angle in range(0, 360, 15):
+            theta = math.radians(angle)
+            offsets.append(
+                radius
+                * (math.cos(theta) * across + math.sin(theta) * normal)
+            )
+    return offsets
+
+
 def solve_path(
     robot: CRS93Sim,
     targets: Sequence[Sequence[np.ndarray]],
@@ -518,36 +645,7 @@ def solve_path(
         alternatives = targets[index]
         if index == 0:
             previous_sign = 1
-            start = np.asarray(points[0], dtype=float)
-            tangent = np.asarray(points[1], dtype=float) - start
-            tangent /= np.linalg.norm(tangent)
-            across = np.array([0.0, 1.0, 0.0])
-            normal = np.cross(tangent, across)
-            normal /= np.linalg.norm(normal)
-            start_offsets = [np.zeros(3)]
-            for radius in np.arange(
-                2.0,
-                MAX_CENTER_DEVIATION_MM,
-                2.0,
-            ):
-                for angle in range(0, 360, 15):
-                    theta = math.radians(angle)
-                    start_offsets.append(
-                        radius
-                        * (math.cos(theta) * across + math.sin(theta) * normal)
-                    )
-            if not np.isclose(
-                MAX_CENTER_DEVIATION_MM % 2.0,
-                0.0,
-            ):
-                radius = MAX_CENTER_DEVIATION_MM
-                for angle in range(0, 360, 15):
-                    theta = math.radians(angle)
-                    start_offsets.append(
-                        radius
-                        * (math.cos(theta) * across + math.sin(theta) * normal)
-                    )
-
+            start_offsets = starting_waypoint_ring(points)
             T_base_puzzle = puzzle_transform(robot)
             selected_start = None
             for center_offset in start_offsets:
@@ -580,9 +678,10 @@ def solve_path(
                     break
 
             if selected_start is None:
-                raise RuntimeError(
+                raise StartingWaypointUnreachable(
                     "The exact flipped hoop face is unreachable at waypoint 0 "
-                    f"within the {MAX_CENTER_DEVIATION_MM:.1f} mm route tube."
+                    "on the sampled starting-position rings within the "
+                    f"{MAX_CENTER_DEVIATION_MM:.1f} mm route tube."
                 )
             center_offset_mm, _, (_, roll_degrees, q_previous) = selected_start
             print(
@@ -1343,13 +1442,16 @@ def main() -> None:
     )
     robot.initialize(home=False)
     robot.set_speed_relative(args.speed)
-    placement = farthest_viable_placement(robot)
+    placement = waypoint_zero_reachable_placement(
+        robot,
+        turntable_xy=np.array([0.4, 0.0]),
+    )
     robot.viewer.set_placement(placement)
     print(
-        "Placed the turntable, base and puzzle at the farthest viable-zone "
-        f"corner: xy=({placement.turntable_xy[0]:.3f}, "
+        "Placed the turntable, base and puzzle at "
+        f"xy=({placement.turntable_xy[0]:.3f}, "
         f"{placement.turntable_xy[1]:.3f}) m; base centered on turntable, "
-        "puzzle rotated 180 degrees."
+        f"base yaw={math.degrees(placement.base_yaw):.0f} degrees."
     )
     if not args.check_collisions:
         print(
