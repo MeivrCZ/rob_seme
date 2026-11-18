@@ -92,3 +92,4 @@ Open http://localhost:8080 (Ctrl+C to quit)
 [CRS93 sync] Listening for joint angles at 127.0.0.1:8081
 Open http://localhost:8080 (Ctrl+C to quit)
 (viser) Connection opened (0, 1 total), 524 persistent messages
+(viser) Connection closed (0, 0 total)
