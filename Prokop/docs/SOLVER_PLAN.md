@@ -3,7 +3,8 @@
 Plan for the team's solution of variant D (hoop through puzzle D on the
 spinning turntable, both spin directions), split into tasks that the three of
 us can work on in parallel, each with an AI assistant. **Status: agreed
-plan (2026-11-18); contracts drafted, under review.**
+plan and split (2026-11-18); contracts drafted, under review; task status in
+section 8.**
 
 Read first: `Prokop/README.md` (simulation, conventions), `Prokop/docs/MEASUREMENTS.md`
 (every measured value), `Prokop/docs/EXPERIMENTS.md` (how the robot really behaves).
@@ -335,7 +336,7 @@ After C0, everything except P1.3, P2.5, P2.6, P3.3 can start at once; those
 four start on fakes and switch to the real inputs when available. Critical path:
 P2.1 → P2.2/P2.3 → P2.5 → P2.6 → integration.
 
-## 8. Proposed split (to be decided)
+## 8. Split (approved 2026-11-18)
 
 Balanced by size and matched to what everyone already does:
 
@@ -349,6 +350,19 @@ Balanced by size and matched to what everyone already does:
 
 Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`,
 `Prokop/solver/…`); only `Prokop/solver/contracts.py` is shared.
+
+### Status
+
+| Task | Owner | Status | Where |
+|---|---|---|---|
+| C0 contracts + fakes | Prokop (+ review by all) | drafted, **under review** | `Prokop/solver/contracts.py`, `tests/test_contracts.py` |
+| P1.1 turntable chain | Prokop | **done** (URDF chain, FK equals the reference to 1e-9; ~0.1 ms per frame) | `Prokop/solver/turntable_chain.py`, `tests/test_turntable_chain.py` |
+| P3.2 robot timing | Prokop | **done** (equals `CRS93Sim` and the real logs; `schedule()` times queued moves with blending) | `Prokop/solver/timing.py`, `tests/test_timing.py` |
+| P2.7 approach (RRT) | Prokop | **done** (lab-6 RRT + random shortcut, local sampling first; 3–6 s for a detour, straight moves at once) | `Prokop/solver/approach.py`, `tests/test_approach.py` |
+| P3.3 executor, P3.4 corrections | Prokop | next | |
+| P1.2, P1.3, P3.1 | Vojtěch | open | |
+| P2.1–P2.6 | Natka | open | |
+| I1, I2, I3 | Prokop | after P3.3 | |
 
 ## 9. Working with AI on a task
 
