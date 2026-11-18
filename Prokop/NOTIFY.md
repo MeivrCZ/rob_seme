@@ -1,4 +1,4 @@
-# Notes for the team (2026-10-20, updated 2026-10-23)
+# Notes for the team (2026-10-20, updated 2026-11-18)
 
 ## Vojtěch: changes in Prokop/ that affect your current code
 
@@ -68,3 +68,23 @@ joint-space direction; at any corner or reversal it (nearly) stops first.
   With `get_q() + d2` the second move bends or reverses relative to the first
   and starts from standstill.
 - The second command has to arrive before the first move starts braking.
+
+## Everyone: the solver plan and the contracts to review (2026-11-18)
+
+The plan for our solution of variant D is in `Prokop/docs/SOLVER_PLAN.md`:
+the pipeline, the tasks with their lab methods and acceptance tests, the
+approved split, and a status table. Please review the shared types in
+`Prokop/solver/contracts.py` (checklist in section 4 of the plan; open
+decisions C1-C12):
+
+- Vojtěch: `BaseMeasurement` (`yaw` is the base frame's x axis in robot
+  coordinates, `t_capture` the time the image was taken) and the
+  `PhaseTracker` protocol for the Kalman filter.
+- Natka: `TurntableModel`, `PuzzlePath`, `Plan`/`PlanStep` (incl. the timing
+  meaning of `t_rel`, C12, and the roll convention).
+
+Already usable from `Prokop/solver/`: the turntable chain (FK of every
+checkpoint at any turntable angle), the robot timing model (arrival times of
+queued moves), approach paths (RRT), phase corrections and the executor. A new
+task P2.8 (feasibility funnel: reach check, IK feasibility map, start-phase
+screening before the expensive search) was added to the planning phase.

@@ -69,7 +69,10 @@ P1.1 turntable kinematic chain ───┘     P2.2–P2.5 targets, IK,      �
   gives the pose of the puzzle and of every checkpoint for any θ, plus θ(t).
 - **Phase 2** searches for the safest plan: start configuration, start phase θ₀,
   the hoop roll at every checkpoint, the IK branch; simulated over the whole
-  timed traversal (the puzzle keeps turning). Output: a `Plan`, or "unreachable".
+  timed traversal (the puzzle keeps turning). A feasibility funnel (reach, IK
+  map, θ₀ screening; P2.8) runs first, so the expensive search only sees
+  candidates that can work, and "unreachable" comes with a reason. Output: a
+  `Plan`, or "unreachable".
 - **Phase 3** approaches, waits for θ₀, walks the checkpoints with targets placed
   at the puzzle's predicted pose at arrival (Kalman filter on θ, aware of the
   camera delay), corrects small errors, and lowers the hoop at the end.
@@ -257,13 +260,15 @@ start.
 - For a start phase θ₀ and speed: arrival times of the checkpoints from
   `RobotTiming` (including the near-stops at bends), puzzle at θ₀ + ω·t, targets
   at the predicted poses (fixed-point iteration: arrival time ↔ target), P2.5 on
-  that moving target sequence, margins along all segments. Search θ₀ (e.g. 5°
-  grid) for both directions; pick the max-min margin plan. No feasible θ₀ →
-  `Plan(feasible=False, reason=...)` (the assignment's "report unreachable").
+  that moving target sequence, margins along all segments. Search only the θ₀
+  candidates that passed the feasibility funnel (P2.8), best first, for both
+  directions; pick the max-min margin plan. No feasible θ₀ →
+  `Plan(feasible=False, reason=...)` (the assignment's "report unreachable"),
+  with P2.8's reason when the screening already failed.
 - Tests: on `example_model()` returns a feasible plan; on a placement out of
   reach returns infeasible with a reason; the plan's own replay (FK at the
   predicted times) keeps the ring on the path within the clearance.
-- Depends on: P2.1–P2.5, P1.1, P3.2.
+- Depends on: P2.1–P2.5, P2.8, P1.1, P3.2.
 
 **P2.7 Approach and retreat paths** (HW06 RRT + random shortcut)
 - Collision-free joint-space path q_home → `q_start` (and back), checked with
@@ -273,6 +278,38 @@ start.
   otherwise.
 - Tests: free straight case; a case needing a detour; respects joint limits.
 - Depends on: C0; independent of the rest of P2.
+
+**P2.8 Feasibility funnel: fast screening before the search** (HW05 analytical IK, HW02 FK)
+- Why: without it, P2.6 runs the full timed simulation (IK, metrics, collision
+  meshes) for every θ₀ and learns that a placement is unreachable only when all
+  of them fail: slow, and without a reason. The funnel filters with cheap
+  checks first; only the survivors get the expensive treatment.
+- Stage A, reach (µs): for each checkpoint, is its wrist centre within the
+  arm's reach (distance from the shoulder within [r_min, r_max]) for some roll
+  and some θ? The roll is free, so the wrist centre lies on a circle around the
+  ring axis; the turntable moves the checkpoint on a circle around its axis. A
+  checkpoint that fails for every θ → infeasible at once: "checkpoint i out of
+  reach".
+- Stage B, IK feasibility map (~seconds): for each checkpoint i × turntable angle
+  θ (e.g. 5° grid) × roll (e.g. 15° grid), the analytical IK solutions within
+  the joint limits (`ctu_crs` `ik`, ~50 µs each; ~25 × 72 × 24 ≈ 43 000 calls ≈
+  2 s), with a cheap singularity flag (|q5| small, elbow stretched). Computed
+  once per placement and cached; reused by P2.5/P2.6.
+- Stage C, θ₀ screening: with nominal arrival times tᵢ (timing model, straight
+  moves), keep the θ₀ for which every checkpoint i has a feasible entry at
+  θ₀ + direction·ω·tᵢ, and consecutive checkpoints have entries with a small
+  joint change (a coarse version of P2.5's graph). Output: the candidate θ₀,
+  ranked by how many options and how far from singularities they leave, or
+  infeasible with the reason (which checkpoint fails at which angles).
+- By-product for the report: stages A–C take seconds per placement, so they can
+  sweep the whole work area × both directions for a reachability map long
+  before the full pipeline works (feeds I2).
+- Tests: `example_model()` has candidates; a placement out of reach is
+  infeasible at stage A with the checkpoint named; no false negatives: every θ₀
+  that P2.6 accepts on the grid is among stage C's candidates.
+- Depends on: P2.1 (`example_path()` until then), P2.2 (a simple target
+  function until then), P2.3 (the analytical IK of `ctu_crs` is enough to
+  start), P1.1, P3.2.
 
 ### Phase 3: execution
 
@@ -326,18 +363,20 @@ low speed first, then spinning; one direction, then both.
 ## 7. Dependencies and parallel work
 
 ```
-C0 contracts + fakes ─┬─► P1.1 chain ─────────────┬─► P1.3 fit ─────────┐
-                      ├─► P1.2 measurement ───────┘   (noise model) ──► P3.1 Kalman ──┐
-                      ├─► P2.1 path ─► P2.2 targets ─┐                                 │
-                      ├─► P2.3 IK ───────────────────┼─► P2.5 roll/branch ─► P2.6 plan ─┼─► I1/I2 ─► I3
-                      ├─► P2.4 metrics ──────────────┘                      ▲          │
-                      ├─► P3.2 timing ──────────────────────────────────────┴─► P3.3 executor ◄─ P3.4
-                      └─► P2.7 approach (RRT)
+C0 contracts + fakes
+ ├─► P1.1 chain ───────────────┬─► P1.3 fit ──────────────► P3.1 Kalman ─────────────┐
+ ├─► P1.2 measurement ─────────┘   (noise model) ─────────────────▲                    │
+ ├─► P2.1 path ─► P2.2 targets ─┐                                                       │
+ ├─► P2.3 IK ───────────────────┼─► P2.8 funnel ─► P2.5 roll/branch ─► P2.6 plan ──┐    │
+ ├─► P2.4 metrics ──────────────┘                                      ▲           ├─► I1/I2 ─► I3
+ ├─► P3.2 timing ──────────────────────────────────────────────────────┴─► P3.3 executor ◄─ P3.4
+ └─► P2.7 approach (RRT) ──────────────────────────────────────────────────────────┘
 ```
 
 After C0, everything except P1.3, P2.5, P2.6, P3.3 can start at once; those
 four start on fakes and switch to the real inputs when available. Critical path:
-P2.1 → P2.2/P2.3 → P2.5 → P2.6 → integration.
+P2.1 → P2.2/P2.3 → P2.8 → P2.5 → P2.6 → integration. P2.8 can start right away
+on the fakes and the `ctu_crs` IK.
 
 ## 8. Split (approved 2026-11-18)
 
@@ -350,6 +389,7 @@ Balanced by size and matched to what everyone already does:
 | 3rd | P3.1 Kalman tracker | P2.2 targets, P2.4 metrics | P2.7 approach (RRT) |
 | 4th | camera calibration on the robot | P2.5 roll/branch, P2.6 plan | P3.3 executor, P3.4 |
 | then | estimation accuracy experiments | planning experiments | I1, I2, I3 |
+| added | | | P2.8 feasibility funnel (proposed, to confirm) |
 
 Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`,
 `Prokop/solver/…`); only `Prokop/solver/contracts.py` is shared.
@@ -366,6 +406,7 @@ Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`
 | P3.3 executor | Prokop | **done** (approach, wait for the phase, just-in-time commands with corrections, aborts; in the sim with a perfect tracker the hoop target is within 3 mm of its place on the spinning puzzle and arrivals within 30 ms of the prediction, both directions) | `Prokop/solver/executor.py`, `tests/test_executor.py` |
 | P1.2, P1.3, P3.1 | Vojtěch | open | |
 | P2.1–P2.6 | Natka | open | |
+| P2.8 feasibility funnel | Prokop (proposed) | added 2026-11-18, open | |
 | I1, I2, I3 | Prokop | waiting for P2.6 (planner) and P1.2/P3.1 (perception, tracker); can start on the fakes | |
 
 ## 9. Working with AI on a task
