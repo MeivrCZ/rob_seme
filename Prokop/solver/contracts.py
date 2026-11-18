@@ -282,6 +282,44 @@ class PhaseEstimate:
         return self.theta + self.omega * dt, float(np.sqrt(F @ self.covariance @ F))
 
 
+class PhaseTracker(Protocol):
+    """Source of the turntable's rotation during execution (P3.1 -> P3.3).
+
+    The tracker owns its measurements (it grabs and processes camera images
+    itself, e.g. in a thread); the executor only asks for the latest estimate.
+    """
+
+    def estimate(self) -> PhaseEstimate:
+        """The latest estimate of the rotation (including all measurements so far)."""
+
+
+class ModelTracker:
+    """A perfect tracker: the rotation of a known TurntableModel (fake for P3.1).
+
+    Attributes:
+        model: The model whose theta(t) is reported.
+        clock: Time source [s].
+    """
+
+    def __init__(self, model: TurntableModel, clock=None) -> None:
+        """Creates the tracker.
+
+        Args:
+            model: The model (in tests: the simulator's truth).
+            clock: Time source; time.monotonic by default.
+        """
+        import time
+        self.model = model
+        self.clock = clock or time.monotonic
+
+    def estimate(self) -> PhaseEstimate:
+        """The model's angle now, with zero uncertainty."""
+        t = self.clock()
+        return PhaseEstimate(t=t, theta=self.model.theta_at(t),
+                             omega=self.model.direction * self.model.omega,
+                             covariance=np.zeros((2, 2)))
+
+
 @dataclass
 class PlanStep:
     """One checkpoint of a plan.
@@ -290,7 +328,12 @@ class PlanStep:
         index: Checkpoint index in the PuzzlePath.
         q: Planned configuration [rad], shape (6,).
         roll: Hoop roll at the checkpoint [rad] (convention in the module doc).
-        t_rel: Planned arrival time after the start of the traversal [s].
+        t_rel: Planned arrival time [s] after the start of the traversal: the
+            moment the first traversal command (move_to_q of the first step) is
+            sent, when the turntable is at Plan.theta_start. The steps are timed
+            as queued back to back (solver.timing.RobotTiming.schedule from
+            Plan.q_start), so the planned angle at arrival is
+            theta_start + direction * OMEGA * t_rel.
         margin: Worst safety margin on the way to this checkpoint
             (dimensionless, > 0 safe; definition in P2.4).
     """
@@ -425,18 +468,27 @@ def example_path() -> PuzzlePath:
                       roll_limits=None, final_index=len(frames) - 1)
 
 
-def example_plan() -> Plan:
+def example_plan(speed: float = 0.2) -> Plan:
     """A hand-made feasible plan (small joint moves near q_home), for the executor.
 
-    Not related to any real path; only the structure and the timing are
-    meaningful.
+    Not related to any real path; the structure and the timing are meaningful:
+    t_rel from solver.timing.RobotTiming.schedule as the contract requires.
+
+    Args:
+        speed: Relative robot speed the plan is timed for.
 
     Returns:
         The plan.
     """
+    from ctu_crs import CRS93
+
+    from solver.timing import RobotTiming
     q_home = np.deg2rad([0.0, 0.0, -45.0, 0.0, -45.0, 0.0])
-    steps = [PlanStep(index=i, q=q_home + np.deg2rad([2.0 * i, -1.0 * i, 0, 0, 0, 0]),
-                      roll=0.0, t_rel=0.4 * i, margin=1.0) for i in range(1, 6)]
-    return Plan(feasible=True, speed=0.2, direction=1, theta_start=0.0,
+    qs = [q_home + np.deg2rad([2.0 * i, -1.0 * i, 1.5 * (-1) ** i, 0, 0, 0])
+          for i in range(1, 6)]
+    arrivals, _ = RobotTiming(CRS93(tty_dev=None), speed).schedule(q_home, qs)
+    steps = [PlanStep(index=i, q=q, roll=0.0, t_rel=t, margin=1.0)
+             for i, (q, t) in enumerate(zip(qs, arrivals), start=1)]
+    return Plan(feasible=True, speed=speed, direction=1, theta_start=0.0,
                 q_start=q_home.copy(), steps=steps, approach=[q_home.copy()],
                 min_margin=1.0)

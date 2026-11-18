@@ -89,6 +89,7 @@ reference) are in its module docstring.
 | `PuzzlePath` | checkpoint `frames` (N×4×4, puzzle frame), `clearance` per checkpoint, `roll_limits` (or None = free), `final_index` | P2.1 → P2 |
 | `RobotTiming` (protocol) | `move_duration(q0, q1, speed)`, `blends(dq_prev, dq_next)` | P3.2 → P2.6, P3.3 |
 | `PhaseEstimate` | `t`, `theta`, signed `omega`, 2×2 covariance; `predict(t)` → θ, σ | P3.1 → P3.3 |
+| `PhaseTracker` (protocol), `ModelTracker` (fake) | `estimate()` → latest `PhaseEstimate` | P3.1 → P3.3 |
 | `Plan`, `PlanStep` | `feasible`/`reason`, `speed`, `direction`, `theta_start`, `q_start`, steps (`index`, `q`, `roll`, `t_rel`, `margin`), `approach`, `min_margin` | P2.6, P2.7 → P3.3 |
 
 Fakes, so that nobody waits for anybody: `example_model()`,
@@ -136,6 +137,8 @@ Taken while drafting the contracts (**open for review**):
 | C8 | `example_path()` is a simplified puzzle-D-like path (straight in, R50 bend, straight down), not the real puzzle D (that is P2.1); `example_plan()` is arbitrary small moves near `q_home`. | — |
 | C9 | The constants `SPIN_PERIOD` (28.0 s), `OMEGA`, `CAMERA_DELAY` (0.11 s) are repeated in the contracts so that other parts need not import the simulator. | import them from `simulation` / `view_models` |
 | C10 | The contracts live in the package `Prokop/solver/` and import `cell` and `placement` (the URDF frames); users put `Prokop/` on `sys.path`. | a standalone module with the frames copied in |
+| C11 | `PhaseTracker` protocol (one method, `estimate() -> PhaseEstimate`): the tracker grabs and processes images itself; the executor only reads the latest estimate. Fake: `ModelTracker(model)` (perfect). Added for P3.3. | the executor passes measurements to the tracker |
+| C12 | `PlanStep.t_rel` is the arrival time after the first traversal command is sent at `theta_start`, with the steps queued back to back (`RobotTiming.schedule`); the planned angle at arrival is `theta_start + direction·ω·t_rel`. The executor keeps the next command queued just in time, which reproduces this timing. | each step sent only after the previous one arrived (slower: a command delay of 0.12 s per step) |
 
 ## 5. Methods from the robotics labs
 
@@ -359,10 +362,11 @@ Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`
 | P1.1 turntable chain | Prokop | **done** (URDF chain, FK equals the reference to 1e-9; ~0.1 ms per frame) | `Prokop/solver/turntable_chain.py`, `tests/test_turntable_chain.py` |
 | P3.2 robot timing | Prokop | **done** (equals `CRS93Sim` and the real logs; `schedule()` times queued moves with blending) | `Prokop/solver/timing.py`, `tests/test_timing.py` |
 | P2.7 approach (RRT) | Prokop | **done** (lab-6 RRT + random shortcut, local sampling first; 3–6 s for a detour, straight moves at once) | `Prokop/solver/approach.py`, `tests/test_approach.py` |
-| P3.3 executor, P3.4 corrections | Prokop | next | |
+| P3.4 corrections | Prokop | **done** (the planned target rotated with the turntable by the phase error; lab-5 numerical IK seeded with the planned q, lab-4 finite-difference Jacobian, lab-1 log map; refuses > 15° or > 20° joint change) | `Prokop/solver/correction.py`, `tests/test_correction.py` |
+| P3.3 executor | Prokop | **done** (approach, wait for the phase, just-in-time commands with corrections, aborts; in the sim with a perfect tracker the hoop target is within 3 mm of its place on the spinning puzzle and arrivals within 30 ms of the prediction, both directions) | `Prokop/solver/executor.py`, `tests/test_executor.py` |
 | P1.2, P1.3, P3.1 | Vojtěch | open | |
 | P2.1–P2.6 | Natka | open | |
-| I1, I2, I3 | Prokop | after P3.3 | |
+| I1, I2, I3 | Prokop | waiting for P2.6 (planner) and P1.2/P3.1 (perception, tracker); can start on the fakes | |
 
 ## 9. Working with AI on a task
 

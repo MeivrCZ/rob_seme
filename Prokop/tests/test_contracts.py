@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from placement import Placement, TaskScene
-from solver.contracts import (OMEGA, PhaseEstimate, TurntableModel, example_model,
+from solver.contracts import (OMEGA, ModelTracker, PhaseEstimate, TurntableModel, example_model,
                               example_path, example_plan, fake_measurements, rot_z)
 
 
@@ -82,3 +82,12 @@ def test_example_plan_is_consistent():
     assert plan.feasible and plan.steps
     assert all(a.t_rel < b.t_rel for a, b in zip(plan.steps, plan.steps[1:]))
     assert all(s.q.shape == (6,) for s in plan.steps)
+
+
+def test_model_tracker_reports_the_model():
+    m = example_model(direction=-1, t_ref=3.0)
+    tracker = ModelTracker(m, clock=lambda: 10.0)
+    est = tracker.estimate()
+    assert est.t == 10.0 and est.theta == pytest.approx(m.theta_at(10.0))
+    assert est.omega == pytest.approx(-OMEGA)
+    assert est.predict(12.0)[0] == pytest.approx(m.theta_at(12.0))
