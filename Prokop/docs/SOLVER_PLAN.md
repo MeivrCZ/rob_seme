@@ -40,6 +40,16 @@ Read first: `Prokop/README.md` (simulation, conventions), `Prokop/docs/MEASUREME
    integration.
 5. **Units and frames**: SI units; the `ctu_crs` robot base frame (x forward, y
    left, z up, table at z ≈ +1 mm); joint values exactly as in `move_to_q`.
+6. **Use the methods of the course labs** (`School/robotics_labs`). The project
+   is meant to apply what the labs and homework taught, so each task builds on
+   the corresponding method, taking the *semantics* of our own implementations
+   in `robotics_labs/src/robotics_toolbox` (same algorithm, same conventions,
+   same structure), rewritten or copied into our code. We do not import the
+   toolbox itself: it is a homework template with its own restrictions and
+   types. Where our homework is unfinished (HW04, HW05, HW06 fail some tests),
+   finishing that method is part of the task that needs it. Section 5 maps every
+   task to its lab method; the Kalman filter (P3.1) is the only part the labs do
+   not cover.
 
 ## 3. Pipeline
 
@@ -95,7 +105,58 @@ Review checklist: Vojtěch the `BaseMeasurement` (note: `yaw` is the base frame'
 x axis in the robot frame, not an image angle), Natka the `TurntableModel`,
 `PuzzlePath` and `Plan`, everyone the conventions.
 
-## 5. Tasks
+### Decisions taken so far (2026-11-18)
+
+From the planning discussion (agreed):
+
+| # | Decision | Why |
+|---|---|---|
+| D1 | Three phases: turntable model → plan optimization → execution. | the user's pipeline |
+| D2 | The turntable + base + puzzle is modelled as a one-joint robot; puzzle and checkpoint poses are its FK. | one number θ(t) carries all the time dependence |
+| D3 | Phase 2 simulates the whole timed traversal (the puzzle keeps turning), not only the start pose; it outputs a start phase θ₀, `q_start` and a timed plan, or "unreachable". | the puzzle moves 2–3 cm/s at the base; a static plan would be wrong by the time it is executed |
+| D4 | Phase 3 tracks θ with a Kalman filter that applies each measurement at its capture time (camera delay 0.11 s) and predicts to the arrival time of each move. | the image is old when it arrives; the robot needs the pose at arrival |
+| D5 | Each person's code stays in their own directory; the perception part delivers exactly `BaseMeasurement` (Vojtěch adapts his output if needed). | parallel, independent work |
+| D6 | The robot speed is a parameter everywhere; its value is decided in testing. | not known yet |
+| D7 | The hoop roll about the ring axis is free (no clearance cost); the tilt of the ring axis off the path is allowed only a little and its clearance loss is counted. | roll is a null-space direction (lab 4); tilt shrinks the opening around the bar |
+| D8 | The shared types are one contracts module, drafted by one person, reviewed by the others, then frozen; later changes by agreement, announced in `NOTIFY.md`. | contracts are code everyone imports |
+| D9 | Methods from the course labs, semantics of our own implementations, no toolbox import (principle 6, section 5). | the assignment asks to apply the labs |
+
+Taken while drafting the contracts (**open for review**):
+
+| # | Decision | Alternative to consider in the review |
+|---|---|---|
+| C1 | The contracts contain a *reference implementation* of the turntable chain (`TurntableModel.puzzle_T`), tested equal to the simulator's puzzle placement; P1.1 is reduced to the URDF/FK version with checkpoint frames, which must match it. | only types in the contracts, the chain only in P1.1 (but then P2 and P3 wait for P1.1) |
+| C2 | θ is the rotation of the turntable top, counter-clockwise from above positive, equal to the simulator's `turntable_angle(t)`; `direction` (±1) and `omega` (magnitude) are separate fields. | signed omega only |
+| C3 | `BaseMeasurement.xy` is the base frame origin (base centre) and `yaw` the direction of the base frame's x axis, both in the robot frame; `t_capture` is the time the image was taken. | image-plane quantities (rejected: perception must deliver robot-frame values, D5) |
+| C4 | Checkpoint frame: z along the direction of travel, x along the puzzle frame's +y (always perpendicular to the path, which lies in the puzzle's x-z plane); the roll is measured about z from this x. | x from the previous checkpoint (parallel transport) |
+| C5 | `PuzzlePath.clearance` is the radial ring↔puzzle clearance with the ring perpendicular to the path; `roll_limits = None` means the roll is free. | clearance as a function of roll and tilt |
+| C6 | `PlanStep.margin` is one number (> 0 safe), its definition belongs to P2.4. | separate margins (singularity, joint limits, clearance) |
+| C7 | `RobotTiming` is a protocol (only the two methods), implemented by P3.2; `PhaseEstimate.omega` is signed. | a concrete class in the contracts |
+| C8 | `example_path()` is a simplified puzzle-D-like path (straight in, R50 bend, straight down), not the real puzzle D (that is P2.1); `example_plan()` is arbitrary small moves near `q_home`. | — |
+| C9 | The constants `SPIN_PERIOD` (28.0 s), `OMEGA`, `CAMERA_DELAY` (0.11 s) are repeated in the contracts so that other parts need not import the simulator. | import them from `simulation` / `view_models` |
+| C10 | The contracts live in the package `Prokop/solver/` and import `cell` and `placement` (the URDF frames); users put `Prokop/` on `sys.path`. | a standalone module with the frames copied in |
+
+## 5. Methods from the robotics labs
+
+Where each method comes from: the lab (exercise) that taught it and our own
+implementation in `School/robotics_labs` to take the semantics from. Test status
+of our homework on 2026-11-18 (`pytest tests/hwXX`).
+
+| Lab / homework | Our implementation (`robotics_labs/src/robotics_toolbox/…`) | Status | Used in |
+|---|---|---|---|
+| Lab 1 / HW01: SO2, SE2, SO3, SE3 (Rodrigues exp/log, composition, inverse, rx/ry/rz, quaternions, angle-axis, Euler) | `core/so3.py`, `core/se3.py`, `core/so2.py`, `core/se2.py` | passes (mandatory + optional) | all frame arithmetic: the turntable chain (P1.1), hoop targets (P2.2), angle differences (P1.3, P3.1; SO2 for wrapping) |
+| Lab 2 / HW02: forward kinematics of a planar chain; a spatial robot written as a URDF | `robots/planar_manipulator.py` (`fk_all_links`), `robots/robot_hw.urdf`, `utils/urdf_utils.py`, `robots/spatial_manipulator.py` (FK from a URDF) | passes | the turntable as a one-joint robot with checkpoint frames (P1.1) |
+| Lab 3 / HW03: ArUco detection, marker pose, homography from hoop images (Hough circles + `cv2.findHomography`) | `utils/perception.py` (`find_hoop_homography`); exercises `lab03/01_detect_aruco.py`, `02_aruco_se3.py`, `03_homography.py` | passes | base measurement from an image (P1.2), camera calibration |
+| Lab 4 / HW04: Jacobian (analytical and finite differences), null-space motion | `robots/planar_manipulator.py` (`jacobian`, `jacobian_finite_difference`), `robots/spatial_manipulator.py` (`jacobian`, geometric 6×n); exercise `lab04/02_null_space_motion_spatial.py` | **fails 2 of 3** | singularity metric (P2.4), the free hoop roll as a null-space direction (P2.5), corrections (P3.4) |
+| Lab 5 / HW05: numerical IK (iterative, Jacobian-based) and analytical IK with all solutions | `robots/planar_manipulator.py` (`ik_numerical`, `ik_analytical`); exercises `lab05/01_numerical_ik.py`, `02_analytical_ik.py` | **fails 2 of 3** (optional 1 of 1) | the IK layer: all analytical solutions + numerical refinement near singularities (P2.3), corrections (P3.4) |
+| Lab 6 / HW06: RRT with goal bias, random shortcut; PRM | `planning/rrt.py` (`plan`, `random_shortcut`), `planning/prm.py`, `utils/configuration_utils.py` (`distance_between_configurations`, `interpolate`) | **RRT fails 1 of 2** (optional) | approach and retreat paths (P2.7) |
+| — | (not in the labs) | — | Kalman filter (P3.1), least-squares fit (P1.3), dynamic programming over the roll (P2.5) |
+
+For an AI assistant working on a task: give it the matching file above (and the
+lab's exercise) as the reference for the method's semantics, together with this
+plan and `contracts.py`.
+
+## 6. Tasks
 
 Each task: what, which lab homework approach it uses, inputs → outputs,
 acceptance tests, and dependencies. "Fake" means the C0 fakes are enough to
@@ -258,7 +319,7 @@ measurement / estimate / command to a run folder for the report).
 **I3 Robot procedure** (`Prokop/docs/ROBOT_CHECKS.md` style): static puzzle at
 low speed first, then spinning; one direction, then both.
 
-## 6. Dependencies and parallel work
+## 7. Dependencies and parallel work
 
 ```
 C0 contracts + fakes ─┬─► P1.1 chain ─────────────┬─► P1.3 fit ─────────┐
@@ -274,7 +335,7 @@ After C0, everything except P1.3, P2.5, P2.6, P3.3 can start at once; those
 four start on fakes and switch to the real inputs when available. Critical path:
 P2.1 → P2.2/P2.3 → P2.5 → P2.6 → integration.
 
-## 7. Proposed split (to be decided)
+## 8. Proposed split (to be decided)
 
 Balanced by size and matched to what everyone already does:
 
@@ -289,13 +350,13 @@ Balanced by size and matched to what everyone already does:
 Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`,
 `Prokop/solver/…`); only `Prokop/solver/contracts.py` is shared.
 
-## 8. Working with AI on a task
+## 9. Working with AI on a task
 
 Give the assistant: this plan, the task's section, `contracts.py`, and the docs
 listed at the top. Each task is done when its acceptance tests pass and it has
 Google-style docstrings; results that affect others go to `Prokop/NOTIFY.md`.
 
-## 9. Open questions
+## 10. Open questions
 
 1. Speed setting (decided in testing; everything takes it as a parameter).
 2. Hoop tilt limit (roll is free; tilt costs clearance).
