@@ -1,9 +1,11 @@
-# CRS93 hoop task: simulation
+# CRS93 hoop task: simulation and solver
 
 Prokop's part of the ROB1 semester project (CTU FEE): a simulation of the CRS93
-station, so that the team can develop and test without booking the robot. The
-task is variant D: the robot moves a hoop along puzzle D standing on a spinning
-turntable, guided by the camera above the table.
+station, so that the team can develop and test without booking the robot, and
+Prokop's share of the team's solver (`solver/`, plan in
+[docs/SOLVER_PLAN.md](docs/SOLVER_PLAN.md)). The task is variant D: the robot
+moves a hoop along puzzle D standing on a spinning turntable, guided by the
+camera above the table.
 
 The core is `CRS93Sim`, a drop-in replacement for `ctu_crs.CRS93`. A script
 written against the robot's interface runs in the sim and on the real robot by
@@ -21,7 +23,8 @@ From the repo root:
 uv sync
 uv run Prokop/demo_sim.py        # simulated robot homes, moves, traces a square
 uv run Prokop/view_models.py     # interactive scene: joint sliders, turntable
-uv run pytest Prokop/tests       # ~100 tests, ~1 min
+uv run pytest Prokop/tests       # ~180 tests, a few minutes (on a small machine run
+                                 #   the files one by one: the whole suite needs ~2 GiB)
 ```
 
 Both programs serve the scene at http://localhost:8080.
@@ -106,6 +109,40 @@ The extra keyword arguments exist in the sim only:
 - **Not simulated yet:** the control unit's queue limit and the small overshoot
   at the end of a real move.
 
+## Solver (`solver/`)
+
+The team's pipeline for the task, planned in
+[docs/SOLVER_PLAN.md](docs/SOLVER_PLAN.md): (1) the turntable with the base and
+puzzle estimated as a one-joint robot from camera images, (2) a plan optimized
+over the whole timed traversal (start phase, hoop roll, IK branch), screened
+first by a feasibility funnel, (3) execution with the turntable's phase tracked
+by a delay-aware Kalman filter. The three of us work on its tasks in parallel;
+the parts exchange only the types of `solver/contracts.py`, which also holds
+fakes so that every part can be developed alone. Every part uses only the
+`CRS93` interface, so it runs on the sim and the robot alike.
+
+Prokop's parts so far:
+
+| Module | Task | What |
+|---|---|---|
+| `solver/contracts.py` | C0 | shared types (`BaseMeasurement`, `TurntableModel`, `PuzzlePath`, `RobotTiming`, `PhaseEstimate`, `PhaseTracker`, `Plan`), the reference turntable chain, fakes; under review by the team |
+| `solver/turntable_chain.py` | P1.1 | the turntable, base, puzzle and checkpoints as a one-joint URDF robot (lab 2); FK of every frame |
+| `solver/timing.py` | P3.2 | the robot's measured timing; `schedule()` gives the arrival times of queued moves, with blending |
+| `solver/approach.py` | P2.7 | collision-free approach paths: RRT + random shortcut (lab 6) against the cell, the table, the spinning task's swept volume and self-collision |
+| `solver/correction.py` | P3.4 | planned targets corrected for the turntable's actual phase: numerical IK (lab 5), finite-difference Jacobian (lab 4) |
+| `solver/executor.py` | P3.3 | runs a `Plan`: approach, wait for the start phase, send each step just in time with its correction, abort safely |
+
+In the sim with the puzzle spinning (both directions) and a perfect tracker, the
+executor keeps the hoop target within 3 mm of its planned place on the puzzle,
+with arrivals within 30 ms of the timing model (`tests/test_executor.py`).
+
+```python
+import sys; sys.path.insert(0, "Prokop")       # from the repo root
+from solver.contracts import example_model, example_plan, ModelTracker
+from solver.executor import Executor
+from solver.timing import RobotTiming
+```
+
 ## Documentation
 
 | Document | Contents |
@@ -113,6 +150,7 @@ The extra keyword arguments exist in the sim only:
 | [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md) | every measured, estimated or assumed value: what, how, where in the code |
 | [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | the experiments at the station (E1–E9): why, what, results, what changed |
 | [docs/ROBOT_CHECKS.md](docs/ROBOT_CHECKS.md) | safety rules, running the tools at the station, open checks |
+| [docs/SOLVER_PLAN.md](docs/SOLVER_PLAN.md) | the team's solver: pipeline, contracts, decisions, lab methods, tasks, split and status |
 | [NOTIFY.md](NOTIFY.md) | notes for the team about changes that affect their code |
 
 The modules and tools have Google-style docstrings; `--help` on any tool prints
@@ -128,14 +166,15 @@ its usage.
 | `camera.py` | the simulated camera: `Camera` model, `SceneRenderer` (off-screen rendering) |
 | `collision.py` | `SceneCollider` (hard collisions of the whole scene), `ArmChecker` (clearance to the table and the cell) |
 | `placement.py` | task models; random turntable / base placement with tip-over and clearance checks |
-| `demo_sim.py` | smoke test of the simulation |
+| `demo_sim.py`, `demo_camera.py` | smoke tests of the simulation and the simulated camera |
+| `solver/` | Prokop's parts of the team's solver and the shared contracts (see above) |
 | `models/` | URDFs and STL meshes: robot with adapter, hoop, base, puzzles A–E, turntable |
 | `tools/robodk2urdf.py`, `step2stl.py`, `mesh_repair.py` | model generators (robot URDF from RoboDK, meshes from STEP) |
 | `tools/log_motion.py`, `camera_survey.py` | measurements on the real robot (also run against the sim) |
 | `tools/analyze_motion.py`, `analyze_survey.py` | analysis of the recorded experiments |
 | `experiments/` | recorded data: `motion_logs/real/`, `camera_survey/<date-time>/` |
 | `docs/` | the documents above, `img/` |
-| `tests/` | pytest suite: models, cell, collision, placement, sim interface, viewer, tools |
+| `tests/` | pytest suite: models, cell, collision, placement, sim interface, viewer, camera, tools, solver |
 
 ## Conventions
 
@@ -157,6 +196,8 @@ its usage.
   go straight into `move_to_q`, on the sim or the robot. Mind the blending rule:
   bending chains of via points run stop-and-go (E6); smooth motion means long
   segments that are straight in joint space.
+- **Solver:** the split of the tasks and the interfaces between the three parts
+  are in [docs/SOLVER_PLAN.md](docs/SOLVER_PLAN.md) (contracts: section 4).
 
 ## Owner
 
