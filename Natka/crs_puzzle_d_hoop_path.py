@@ -1,14 +1,12 @@
-"""Describe and simulate a CRS hoop path along puzzle D in RoboDK.
+"""Describe and validate a CRS hoop path along puzzle D.
 
-The path is relative to a RoboDK frame aligned with D.step: X is across the
-profile, Y is the 10 mm part thickness, and Z is vertical. The hoop drawing
-specifies a 62.4 mm inner ring diameter and 135 mm from ring center to mount.
-Define the RoboDK tool with its TCP at the ring center and its ring axis along
-the tool's local Z; include the 135 mm mount offset in that tool definition.
+The path is relative to a frame aligned with D.step: X is across the profile,
+Y is the 10 mm part thickness, and Z is vertical. The hoop drawing specifies a
+62.4 mm inner ring diameter and 135 mm from ring center to mount.
 
-Run without arguments to print the waypoints. Use --simulate with RoboDK
-item names to run the path in the RoboDK station simulator. This does not
-connect to or move a physical robot.
+Run without arguments to print the checkpoints. Use --check-mesh to validate
+them against the Puzzle D collision mesh. RoboDK path simulation is in
+path_sim.py.
 """
 
 from __future__ import annotations
@@ -237,61 +235,8 @@ def print_path(points: Sequence[tuple[float, float, float]]) -> None:
         print(f"{index:5d} {x:9.2f} {y:8.2f} {z:8.2f} {angle:16.2f}")
 
 
-def simulate(
-    points: Sequence[tuple[float, float, float]],
-    robot_name: str,
-    frame_name: str,
-    tool_name: str,
-    speed_mm_s: float,
-) -> None:
-    try:
-        from robodk.robolink import ITEM_TYPE_FRAME, ITEM_TYPE_ROBOT, ITEM_TYPE_TOOL, RUNMODE_SIMULATE, Robolink
-        from robodk.robomath import roty, transl
-    except ImportError as error:
-        raise SystemExit(
-            "RoboDK's Python API is required for simulation. Run this script "
-            "with RoboDK's Python environment or install its API package."
-        ) from error
-
-    station = Robolink()
-    robot = station.Item(robot_name, ITEM_TYPE_ROBOT)
-    frame = station.Item(frame_name, ITEM_TYPE_FRAME)
-    tool = station.Item(tool_name, ITEM_TYPE_TOOL)
-    for name, item in ((robot_name, robot), (frame_name, frame), (tool_name, tool)):
-        if not item.Valid():
-            raise SystemExit(f"RoboDK station item not found: {name}")
-
-    station.setRunMode(RUNMODE_SIMULATE)
-    robot.setPoseFrame(frame)
-    robot.setPoseTool(tool)
-    robot.setSpeed(speed_mm_s)
-
-    def target(index: int):
-        x, y, z = points[index]
-        angle = math.radians(tangent_angle(points, index))
-        return transl(x, y, z) * roty(angle)
-
-    robot.MoveJ(target(0))
-    for index in range(1, len(points)):
-        robot.MoveL(target(index))
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--simulate",
-        action="store_true",
-        help="run the path in the RoboDK station simulator",
-    )
-    parser.add_argument("--robot", help="RoboDK CRS robot item name")
-    parser.add_argument("--frame", help="RoboDK frame aligned to D.step")
-    parser.add_argument("--tool", help="RoboDK hoop tool with TCP at ring center")
-    parser.add_argument(
-        "--speed",
-        type=float,
-        default=20.0,
-        help="simulated linear speed in mm/s (default: 20)",
-    )
     parser.add_argument("--urdf", default=str(PUZZLE_URDF),
                         help="puzzle URDF used for collision-mesh recreation")
     parser.add_argument("--check-mesh", action="store_true",
@@ -322,21 +267,6 @@ def main() -> None:
                 "clearance_m": clearances.tolist(),
                 "final_index": len(points) - 1,
             }, indent=2))
-    if args.simulate:
-        missing = [
-            option
-            for option, value in (
-                ("--robot", args.robot),
-                ("--frame", args.frame),
-                ("--tool", args.tool),
-            )
-            if not value
-        ]
-        if missing:
-            parser.error("--simulate requires " + ", ".join(missing))
-        if args.speed <= 0:
-            parser.error("--speed must be greater than zero")
-        simulate(points, args.robot, args.frame, args.tool, args.speed)
 
 
 if __name__ == "__main__":
