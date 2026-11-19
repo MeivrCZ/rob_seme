@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+<title>Puzzle D X-Z profile with hoop ring-centre checkpoints</title>
+<desc>Center-plane section of puzzle_D.urdf at Y=0 mm. The numbered red points are ring-centre checkpoints, ordered from the open end toward the base.</desc>
+<style>
+ text { font-family: sans-serif; fill: #263238; }
+ .grid { stroke: #dce3e8; stroke-width: 1; }
+ .axis { stroke: #394b59; stroke-width: 2; }
+ .puzzle { fill: #d8dee3; fill-opacity: .78; stroke: #52616b; stroke-width: 2; }
+ .path { fill: none; stroke: #d13c35; stroke-width: 2; stroke-dasharray: 6 5; }
+ .point { fill: #d13c35; stroke: white; stroke-width: 2; }
+ .label { font-size: 13px; font-weight: 600; }
+</style>
+<rect width="100%" height="100%" fill="white"/>
+<text x="600.0" y="38" text-anchor="middle" font-size="25" font-weight="700">Puzzle D profile and hoop checkpoints</text>
+<text x="600.0" y="62" text-anchor="middle" font-size="15">X–Z section at Y = 0 mm · coordinates in mm · travel from open end to base</text>
+
+<line class="grid" x1="391.5" y1="80" x2="391.5" y2="805.0"/>
+<text x="391.5" y="829.0" text-anchor="middle" font-size="14">-25</text>
+<line class="grid" x1="486.9" y1="80" x2="486.9" y2="805.0"/>
+<text x="486.9" y="829.0" text-anchor="middle" font-size="14">0</text>
+<line class="grid" x1="582.3" y1="80" x2="582.3" y2="805.0"/>
+<text x="582.3" y="829.0" text-anchor="middle" font-size="14">25</text>
+<line class="grid" x1="677.7" y1="80" x2="677.7" y2="805.0"/>
+<text x="677.7" y="829.0" text-anchor="middle" font-size="14">50</text>
+<line class="grid" x1="773.1" y1="80" x2="773.1" y2="805.0"/>
+<text x="773.1" y="829.0" text-anchor="middle" font-size="14">75</text>
+<line class="grid" x1="868.5" y1="80" x2="868.5" y2="805.0"/>
+<text x="868.5" y="829.0" text-anchor="middle" font-size="14">100</text>
+<line class="grid" x1="353.4" y1="747.8" x2="1155.0" y2="747.8"/>
+<text x="341.4" y="752.8" text-anchor="end" font-size="14">0</text>
+<line class="grid" x1="353.4" y1="652.4" x2="1155.0" y2="652.4"/>
+<text x="341.4" y="657.4" text-anchor="end" font-size="14">25</text>
+<line class="grid" x1="353.4" y1="557.0" x2="1155.0" y2="557.0"/>
+<text x="341.4" y="562.0" text-anchor="end" font-size="14">50</text>
+<line class="grid" x1="353.4" y1="461.6" x2="1155.0" y2="461.6"/>
+<text x="341.4" y="466.6" text-anchor="end" font-size="14">75</text>
+<line class="grid" x1="353.4" y1="366.2" x2="1155.0" y2="366.2"/>
+<text x="341.4" y="371.2" text-anchor="end" font-size="14">100</text>
+<line class="grid" x1="353.4" y1="270.8" x2="1155.0" y2="270.8"/>
+<text x="341.4" y="275.8" text-anchor="end" font-size="14">125</text>
+<line class="grid" x1="353.4" y1="175.4" x2="1155.0" y2="175.4"/>
+<text x="341.4" y="180.4" text-anchor="end" font-size="14">150</text>
+<line class="grid" x1="353.4" y1="80.0" x2="1155.0" y2="80.0"/>
+<text x="341.4" y="85.0" text-anchor="end" font-size="14">175</text>
+<path class="puzzle" d="M 403.45 757.30 L 403.58 757.30 L 403.71 757.30 L 405.51 757.30 L 409.31 757.30 L 411.13 757.30 L 411.40 757.30 L 423.08 757.30 L 543.28 757.30 L 550.74 757.30 L 562.42 757.30 L 562.68 757.30 L 563.59 757.30 L 564.51 757.30 L 569.32 757.30 L 570.36 757.30 L 570.36 747.76 L 563.60 747.76 L 563.60 747.83 L 563.60 752.53 L 563.42 752.53 L 563.04 752.53 L 544.28 752.53 L 534.40 752.53 L 530.12 752.53 L 527.35 752.53 L 524.68 752.53 L 524.68 747.76 L 505.99 747.76 L 505.99 686.57 L 505.99 625.39 L 477.37 596.77 L 448.75 568.15 L 448.75 457.63 L 448.75 347.11 L 448.82 343.56 L 448.90 340.01 L 449.12 336.47 L 449.34 332.93 L 449.70 329.40 L 450.07 325.87 L 450.58 322.35 L 451.09 318.84 L 451.75 315.36 L 452.40 311.87 L 453.20 308.41 L 454.00 304.95 L 454.95 301.53 L 455.89 298.11 L 456.97 294.73 L 458.05 291.35 L 459.28 288.02 L 460.50 284.69 L 461.85 281.41 L 463.21 278.13 L 464.70 274.91 L 466.20 271.69 L 467.82 268.54 L 469.45 265.38 L 471.20 262.29 L 472.95 259.21 L 474.83 256.20 L 476.71 253.19 L 478.71 250.26 L 480.71 247.33 L 482.84 244.48 L 484.96 241.64 L 487.19 238.88 L 489.43 236.13 L 491.78 233.47 L 494.13 230.81 L 496.59 228.25 L 499.04 225.69 L 501.60 223.23 L 504.16 220.77 L 506.82 218.42 L 509.48 216.08 L 512.24 213.84 L 514.99 211.60 L 517.84 209.48 L 520.68 207.36 L 523.61 205.36 L 526.54 203.35 L 529.55 201.48 L 532.56 199.60 L 535.65 197.84 L 538.74 196.09 L 541.89 194.47 L 545.05 192.84 L 548.27 191.35 L 551.49 189.86 L 554.76 188.50 L 558.04 187.14 L 561.37 185.92 L 564.71 184.70 L 568.09 183.62 L 571.47 182.53 L 574.89 181.59 L 578.31 180.65 L 581.77 179.85 L 585.22 179.05 L 588.71 178.39 L 592.20 177.74 L 595.71 177.23 L 599.22 176.71 L 602.75 176.35 L 606.28 175.98 L 609.82 175.76 L 613.36 175.54 L 616.91 175.47 L 620.46 175.39 L 715.86 175.39 L 811.25 175.39 L 811.25 156.32 L 811.25 137.24 L 715.86 137.24 L 620.46 137.24 L 616.54 137.31 L 612.61 137.38 L 608.70 137.60 L 604.78 137.82 L 600.87 138.19 L 596.96 138.56 L 593.07 139.07 L 589.18 139.58 L 585.31 140.24 L 581.44 140.90 L 577.60 141.70 L 573.76 142.50 L 569.95 143.44 L 566.14 144.39 L 562.37 145.47 L 558.60 146.56 L 554.87 147.79 L 551.15 149.01 L 547.47 150.38 L 543.79 151.74 L 540.16 153.25 L 536.54 154.75 L 532.97 156.38 L 529.40 158.02 L 525.90 159.79 L 522.40 161.56 L 518.96 163.46 L 515.53 165.35 L 512.17 167.38 L 508.80 169.40 L 505.52 171.55 L 502.24 173.70 L 499.04 175.97 L 495.84 178.25 L 492.72 180.63 L 489.61 183.02 L 486.59 185.53 L 483.57 188.03 L 480.64 190.65 L 477.71 193.26 L 474.89 195.98 L 472.06 198.71 L 469.34 201.53 L 466.62 204.36 L 464.00 207.28 L 461.39 210.21 L 458.88 213.23 L 456.38 216.25 L 453.99 219.37 L 451.60 222.48 L 449.33 225.68 L 447.06 228.88 L 444.91 232.17 L 442.76 235.45 L 440.73 238.81 L 438.71 242.17 L 436.81 245.61 L 434.91 249.04 L 433.14 252.54 L 431.38 256.05 L 429.74 259.61 L 428.10 263.18 L 426.60 266.81 L 425.10 270.43 L 423.73 274.11 L 422.37 277.79 L 421.14 281.52 L 419.92 285.25 L 418.83 289.02 L 417.74 292.79 L 416.80 296.60 L 415.85 300.41 L 415.05 304.25 L 414.25 308.09 L 413.59 311.96 L 412.94 315.83 L 412.42 319.72 L 411.91 323.61 L 411.55 327.51 L 411.18 331.42 L 410.96 335.34 L 410.74 339.26 L 410.67 343.18 L 410.59 347.11 L 410.59 465.53 L 410.59 583.96 L 439.21 612.57 L 467.83 641.19 L 467.83 694.48 L 467.83 747.76 L 449.13 747.76 L 449.13 752.53 L 446.93 752.53 L 444.96 752.53 L 436.06 752.53 L 430.64 752.53 L 424.93 752.53 L 419.35 752.53 L 415.23 752.53 L 412.47 752.53 L 410.49 752.53 L 410.40 752.53 L 410.21 752.53 L 410.21 747.83 L 410.21 747.76 L 403.45 747.76 L 403.45 757.30 Z"/>
+<polyline class="path" points="868.49,156.32 811.25,156.32 620.46,156.32 603.83,157.04 587.33,159.21 571.08,162.82 555.21,167.82 539.83,174.19 525.07,181.88 511.03,190.82 497.82,200.95 485.55,212.20 474.31,224.47 464.17,237.67 455.23,251.71 447.55,266.47 441.18,281.85 436.17,297.73 432.57,313.98 430.40,330.48 429.67,347.11 429.67,576.05 486.91,633.29 486.91,652.37 486.91,671.45"/>
+<circle class="point" cx="868.49" cy="156.32" r="5.5"><title>Checkpoint 0: X=100.00 mm, Z=155.00 mm</title></circle>
+<circle class="point" cx="811.25" cy="156.32" r="5.5"><title>Checkpoint 1: X=85.00 mm, Z=155.00 mm</title></circle>
+<circle class="point" cx="620.46" cy="156.32" r="5.5"><title>Checkpoint 2: X=35.00 mm, Z=155.00 mm</title></circle>
+<circle class="point" cx="603.83" cy="157.04" r="5.5"><title>Checkpoint 3: X=30.64 mm, Z=154.81 mm</title></circle>
+<circle class="point" cx="587.33" cy="159.21" r="5.5"><title>Checkpoint 4: X=26.32 mm, Z=154.24 mm</title></circle>
+<circle class="point" cx="571.08" cy="162.82" r="5.5"><title>Checkpoint 5: X=22.06 mm, Z=153.30 mm</title></circle>
+<circle class="point" cx="555.21" cy="167.82" r="5.5"><title>Checkpoint 6: X=17.90 mm, Z=151.98 mm</title></circle>
+<circle class="point" cx="539.83" cy="174.19" r="5.5"><title>Checkpoint 7: X=13.87 mm, Z=150.32 mm</title></circle>
+<circle class="point" cx="525.07" cy="181.88" r="5.5"><title>Checkpoint 8: X=10.00 mm, Z=148.30 mm</title></circle>
+<circle class="point" cx="511.03" cy="190.82" r="5.5"><title>Checkpoint 9: X=6.32 mm, Z=145.96 mm</title></circle>
+<circle class="point" cx="497.82" cy="200.95" r="5.5"><title>Checkpoint 10: X=2.86 mm, Z=143.30 mm</title></circle>
+<circle class="point" cx="485.55" cy="212.20" r="5.5"><title>Checkpoint 11: X=-0.36 mm, Z=140.36 mm</title></circle>
+<circle class="point" cx="474.31" cy="224.47" r="5.5"><title>Checkpoint 12: X=-3.30 mm, Z=137.14 mm</title></circle>
+<circle class="point" cx="464.17" cy="237.67" r="5.5"><title>Checkpoint 13: X=-5.96 mm, Z=133.68 mm</title></circle>
+<circle class="point" cx="455.23" cy="251.71" r="5.5"><title>Checkpoint 14: X=-8.30 mm, Z=130.00 mm</title></circle>
+<circle class="point" cx="447.55" cy="266.47" r="5.5"><title>Checkpoint 15: X=-10.32 mm, Z=126.13 mm</title></circle>
+<circle class="point" cx="441.18" cy="281.85" r="5.5"><title>Checkpoint 16: X=-11.98 mm, Z=122.10 mm</title></circle>
+<circle class="point" cx="436.17" cy="297.73" r="5.5"><title>Checkpoint 17: X=-13.30 mm, Z=117.94 mm</title></circle>
+<circle class="point" cx="432.57" cy="313.98" r="5.5"><title>Checkpoint 18: X=-14.24 mm, Z=113.68 mm</title></circle>
+<circle class="point" cx="430.40" cy="330.48" r="5.5"><title>Checkpoint 19: X=-14.81 mm, Z=109.36 mm</title></circle>
+<circle class="point" cx="429.67" cy="347.11" r="5.5"><title>Checkpoint 20: X=-15.00 mm, Z=105.00 mm</title></circle>
+<circle class="point" cx="429.67" cy="576.05" r="5.5"><title>Checkpoint 21: X=-15.00 mm, Z=45.00 mm</title></circle>
+<circle class="point" cx="486.91" cy="633.29" r="5.5"><title>Checkpoint 22: X=0.00 mm, Z=30.00 mm</title></circle>
+<circle class="point" cx="486.91" cy="652.37" r="5.5"><title>Checkpoint 23: X=0.00 mm, Z=25.00 mm</title></circle>
+<circle class="point" cx="486.91" cy="671.45" r="5.5"><title>Checkpoint 24: X=0.00 mm, Z=20.00 mm</title></circle>
+<text class="label" x="877.4868421052631" y="147.31578947368416" text-anchor="start">0</text>
+<text class="label" x="802.25" y="173.31578947368416" text-anchor="end">1</text>
+<text class="label" x="629.4605263157895" y="147.31578947368416" text-anchor="start">2</text>
+<text class="label" x="564.2066831812868" y="158.8218026132148" text-anchor="start">6</text>
+<text class="label" x="506.82341657296286" y="191.95204703651075" text-anchor="start">10</text>
+<text class="label" x="464.23199533060057" y="242.71052631578937" text-anchor="start">14</text>
+<text class="label" x="441.56957343846034" y="304.97501873459885" text-anchor="start">18</text>
+<text class="label" x="438.67105263157896" y="338.10526315789474" text-anchor="start">20</text>
+<text class="label" x="420.67105263157896" y="593.0526315789474" text-anchor="end">21</text>
+<text class="label" x="495.9078947368421" y="624.2894736842105" text-anchor="start">22</text>
+<text class="label" x="477.9078947368421" y="669.3684210526316" text-anchor="end">23</text>
+<text class="label" x="495.9078947368421" y="662.4473684210526" text-anchor="start">24</text>
+<line class="axis" x1="353.35526315789474" y1="805.0" x2="1155" y2="805.0"/>
+<line class="axis" x1="353.35526315789474" y1="80" x2="353.35526315789474" y2="805.0"/>
+<text x="630.0" y="878" text-anchor="middle" font-size="17" font-weight="700">X (mm)</text>
+<text x="25" y="442.5" text-anchor="middle" font-size="17" font-weight="700" transform="rotate(-90 25 442.5)">Z (mm)</text>
+<rect x="870" y="95" width="285" height="74" rx="8" fill="white" stroke="#aab5bd"/>
+<rect x="890" y="116" width="18" height="14" fill="#d8dee3" stroke="#52616b"/>
+<text x="918" y="128" font-size="14">Puzzle D mesh section</text>
+<circle class="point" cx="899" cy="150" r="5.5"/><text x="918" y="155" font-size="14">Ring-centre checkpoint (25 total)</text>
+</svg>

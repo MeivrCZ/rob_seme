@@ -204,7 +204,7 @@ start.
 
 ### Phase 2: plan
 
-**P2.1 Puzzle path** (geometry; puzzle CAD)
+**P2.1 Puzzle path** (geometry; puzzle CAD) — **Natka implementation done**
 - Checkpoints of the hoop's ring centre through puzzle D in the puzzle frame,
   with tangents; from `Natka/crs_puzzle_d_hoop_path.profile_points` (mm, `D.step`
   frame = puzzle URDF origin) as a starting point.
@@ -215,6 +215,9 @@ start.
   puzzle mesh; spacing between checkpoints small enough that a straight segment
   stays within the clearance.
 - Depends on: nothing (puzzle frame only).
+- Implemented in `Natka/crs_puzzle_d_hoop_path.py`: loads `puzzle_D.urdf` and
+  its collision STL, recreates the ring-centre checkpoints and D4/D5 frames in
+  metres, and can validate ring clearance against the mesh with `--check-mesh`.
 
 **P2.2 Hoop targets** (HW01 SE3)
 - `flange_target(checkpoint_T, roll, tilt=0) -> T_flange`: ring centre on the
@@ -225,13 +228,16 @@ start.
   checkpoint and its axis along the tangent; roll does not move the ring centre.
 - Depends on: P2.1 types (fake checkpoints are enough).
 
-**P2.3 IK layer** (HW05 IK: analytical + numerical)
+**P2.3 IK layer** (HW05 IK: analytical + numerical) — **Natka implementation done**
 - All solutions (`ctu_crs` analytical IK), within limits, ±2π variants of the
   wrist joints, numerical refinement near singularities (the analytical IK sets
   q5 = 0 exactly there); choice of the solution continuing a given branch.
 - Tests: FK(IK(T)) = T; continuity along a smooth target sequence; behaviour at
   q5 ≈ 0.
 - Depends on: nothing.
+- Implemented in `Natka/plan_ik.py`: expands and filters analytical CRS93
+  solutions, refines near-singular solutions numerically, and selects the
+  nearest solution to continue a previous branch.
 
 **P2.4 Safety metrics** (HW04 Jacobian; collision module)
 - For a configuration: manipulability / smallest singular value of the CRS93
@@ -405,7 +411,7 @@ Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`
 | P3.4 corrections | Prokop | **done** (the planned target rotated with the turntable by the phase error; lab-5 numerical IK seeded with the planned q, lab-4 finite-difference Jacobian, lab-1 log map; refuses > 15° or > 20° joint change) | `Prokop/solver/correction.py`, `tests/test_correction.py` |
 | P3.3 executor | Prokop | **done** (approach, wait for the phase, just-in-time commands with corrections, aborts; in the sim with a perfect tracker the hoop target is within 3 mm of its place on the spinning puzzle and arrivals within 30 ms of the prediction, both directions) | `Prokop/solver/executor.py`, `tests/test_executor.py` |
 | P1.2, P1.3, P3.1 | Vojtěch | open | |
-| P2.1–P2.6 | Natka | open | |
+| P2.1–P2.6 | Natka | P2.1, P2.3 done; P2.2, P2.4–P2.6 open | `Natka/crs_puzzle_d_hoop_path.py`, `Natka/plan_ik.py` |
 | P2.8 feasibility funnel | Prokop (proposed) | added 2026-11-18, open | |
 | I1, I2, I3 | Prokop | waiting for P2.6 (planner) and P1.2/P3.1 (perception, tracker); can start on the fakes | |
 
