@@ -21,6 +21,8 @@ Pokud už na portu 8080 běží jiná simulace, přidej `--port 8082` a otevři 
 | `aruco detect` | Pořídí snímek, uloží originál i vyznačenou kopii a vypíše nalezená ID, střed a natočení v obraze i v souřadnicích robota. |
 | `homo run` | Projede kalibrační polohy, vyfotí obruč a spočítá projekční matici 3×4. |
 | `homo status` | Vypíše aktivní matici a zdroj kalibrace. |
+| `homo orbit [N [INTERVAL_S]]` | Vyfotí rotující držák a odhadne jeho dráhu. Výchozí je 10 snímků po 1 s. |
+| `homo predict [SEKUND]` | Vypíše odhad středu a natočení v zadaném čase vzhledem k okamžiku příkazu. |
 | `help` / `quit` | Zobrazí příkazy / ukončí konzoli a Viser. |
 
 Snímky v plném rozlišení se ukládají do `Vojtěch/Mainframe/captures/`. Detekce používá `ArucoFinder` pro značky základny s ID 1 a 2 a Natčiny funkce pro převod z obrazu do souřadnic robota.
@@ -32,3 +34,11 @@ Mainframe běží výhradně v simulaci. Kontrola kolizí je vypnutá. Prokopův
 `homo run` projede pevnou mřížku 3 × 3 ve výškách 225, 300 a 390 mm nad stolem. V každé poloze robot počká na zastavení. Střed obruče v souřadnicích robota se získá z odečtených kloubů a dopředné kinematiky. Střed v pixelech detekuje `Homografy` ve snímku simulované kamery.
 
 Snímky `point_XX.png` a `homography.json` s maticí `P` a naměřenými dvojicemi najdeš v `captures/homography_<čas>/`. Konzole vypíše chybu přepočtu na kontrolních bodech. Po úspěšném průjezdu použije `aruco detect` naměřenou matici do ukončení Mainframu. Nová relace začíná se syntetickou kalibrací simulátoru.
+
+## Dráha rotujícího držáku
+
+V panelu **Turntable** vyber **Random viable placement** a zapni **Spin**. Pro měření můžeš použít výchozí periodu 28 s. V konzoli zadej `homo orbit` a po doběhnutí třeba `homo predict 2`. Během sběru a následné předpovědi ponech točnu běžet stejnou rychlostí a držák na stejném místě vůči točně.
+
+Program používá aktivní homografii a rovinu ArUco značek 64,6 mm nad stolem. Čas snímku odhaduje odečtením latence kamery 0,11 s od času návratu `grab_image`. Výpočet potřebuje aspoň čtyři platné detekce a natočení aspoň o 20°. Mezi dvěma platnými snímky musí točna urazit méně než půl otáčky, aby šel určit směr. U prakticky vystředěného držáku se dráha zjednoduší na bod, natočení se dál předpovídá.
+
+Výstupy jsou v `captures/orbit_<čas>/`. `orbit.png` ukazuje dráhu a naměřené středy na posledním snímku se značkami. `orbit.json` obsahuje vzorky, parametry `TurntableModel` v metrech, radiánech a sekundách, poloměr, znaménkovou rychlost i chybu přizpůsobení. Nulová fáze odpovídá poslednímu snímku s detekcí a predikce v konzoli používá monotónní čas stejného běhu.

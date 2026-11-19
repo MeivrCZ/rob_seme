@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +28,10 @@ from homography import Homography  # noqa: E402
 from placement import HOOP_MOUNT, MODELS, load_urdf  # noqa: E402
 from sim_find_and_solve import marker_base_pose, simulated_homography  # noqa: E402
 from simulation import CRS93Sim  # noqa: E402
+from solver.contracts import TurntableModel  # noqa: E402
+from turntable_orbit import (  # noqa: E402
+    MARKER_HEIGHT_ABOVE_TABLE_M, capture_series, draw_orbit, fit_orbit, measure_base,
+)
 
 
 HELP = """Příkazy
@@ -38,6 +44,8 @@ HELP = """Příkazy
   aruco detect                       vyfotí scénu, najde značky a uloží výsledek
   homo run                           projede polohy obruče a spočítá matici 3×4
   homo status                        zobrazí aktivní matici a zdroj kalibrace
+  homo orbit [N [INTERVAL_S]]         odhadne dráhu držáku (výchozí 10 snímků po 1 s)
+  homo predict [SEKUND]               předpoví polohu držáku, výchozí je teď
   help                               zobrazí příkazy
   quit                               ukončí simulaci
 """
@@ -47,6 +55,7 @@ HELP = """Příkazy
 class CameraCalibration:
     model: Homography
     path: Path | None = None
+    turntable: TurntableModel | None = None
 
 
 def capture_stamp() -> str:
@@ -152,6 +161,51 @@ def detect_markers(robot: CRS93Sim, detector: ArucoBlockDetector,
           f"natočení {np.rad2deg(yaw):+.2f}°")
 
 
+def measure_turntable(robot: CRS93Sim, detector: ArucoBlockDetector, homography: Homography,
+                      count: int, interval_s: float) -> TurntableModel:
+    directory = CAPTURES / f"orbit_{capture_stamp()}"
+    marker_z = homography.table_z_m + MARKER_HEIGHT_ABOVE_TABLE_M
+    measurements = []
+    frames = []
+    reference_image = None
+    print(f"Měřím dráhu držáku. Snímky se ukládají do {directory}")
+    for index, (t_capture, image) in enumerate(
+        capture_series(robot.grab_image, count, interval_s, robot.camera_delay), start=1
+    ):
+        name = f"frame_{index:02d}.png"
+        save_png(directory / name, image)
+        sample = measure_base(image, t_capture, detector, homography, marker_z)
+        record = {"image": name, "t_capture": t_capture, "n_markers": 0}
+        if sample is None:
+            print(f"  {index:02d}/{count} | značky nenalezeny")
+        else:
+            measurements.append(sample)
+            reference_image = image
+            record.update(xy=sample.xy.tolist(), yaw=sample.yaw, n_markers=sample.n_markers)
+            print(f"  {index:02d}/{count} | {sample.n_markers} značky | XY {sample.xy.round(4)} m")
+        frames.append(record)
+
+    fit = fit_orbit(measurements)
+    model = fit.model
+    save_png(directory / "orbit.png", draw_orbit(reference_image, fit, measurements, homography, marker_z))
+    data = {
+        "model": {
+            "axis_xy": model.axis_xy.tolist(), "base_offset": model.base_offset.tolist(),
+            "base_yaw": model.base_yaw, "direction": model.direction, "omega": model.omega,
+            "theta_ref": model.theta_ref, "t_ref": model.t_ref,
+        },
+        "radius_m": fit.radius_m, "signed_omega_rad_s": fit.signed_omega, "period_s": fit.period_s,
+        "xy_rmse_m": fit.xy_rmse_m, "yaw_rmse_rad": fit.yaw_rmse_rad,
+        "marker_z_m": marker_z, "camera_delay_s": robot.camera_delay, "frames": frames,
+    }
+    path = directory / "orbit.json"
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    print(f"Osa XY {model.axis_xy.round(4)} m | poloměr {1000 * fit.radius_m:.1f} mm | "
+          f"rychlost {np.rad2deg(fit.signed_omega):+.2f}°/s | perioda {fit.period_s:.2f} s")
+    print(f"RMSE polohy {1000 * fit.xy_rmse_m:.2f} mm | model {path}")
+    return model
+
+
 def dispatch(robot: CRS93Sim, detector: ArucoBlockDetector,
              calibration: CameraCalibration, words: list[str]) -> bool:
     match words:
@@ -199,6 +253,18 @@ def dispatch(robot: CRS93Sim, detector: ArucoBlockDetector,
         case ["homo", "status"]:
             print("Zdroj kalibrace", calibration.path or "syntetická kalibrace simulátoru")
             print("Projekční matice P [3×4]\n", calibration.model.P, sep="")
+        case ["homo", "orbit", *options] if len(options) <= 2:
+            count = int(options[0]) if options else 10
+            interval = float(options[1]) if len(options) == 2 else 1.0
+            calibration.turntable = measure_turntable(robot, detector, calibration.model, count, interval)
+        case ["homo", "predict", *options] if len(options) <= 1:
+            if calibration.turntable is None:
+                raise RuntimeError("Nejdřív změř dráhu držáku příkazem homo orbit.")
+            seconds = float(options[0]) if options else 0.0
+            if not np.isfinite(seconds):
+                raise ValueError("Čas předpovědi musí být konečný.")
+            xy, yaw = calibration.turntable.measurement_at(time.monotonic() + seconds)
+            print(f"Předpověď pro t {seconds:+g} s | střed XY {xy.round(4)} m | natočení {np.rad2deg(yaw):+.2f}°")
         case _:
             print("Neznámý nebo neúplný příkaz. Zadej help.")
     return True
