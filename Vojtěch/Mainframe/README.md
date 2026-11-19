@@ -25,13 +25,13 @@ Pokud už na portu 8080 běží jiná simulace, přidej `--port 8082` a otevři 
 | `homo predict [SEKUND]` | Vypíše odhad středu a natočení v zadaném čase vzhledem k okamžiku příkazu. |
 | `help` / `quit` | Zobrazí příkazy / ukončí konzoli a Viser. |
 
-Snímky v plném rozlišení se ukládají do `Vojtěch/Mainframe/captures/`. Detekce používá `ArucoFinder` pro značky základny s ID 1 a 2 a Natčiny funkce pro převod z obrazu do souřadnic robota.
+Snímky v plném rozlišení se ukládají do `Vojtěch/Mainframe/captures/`. Detekce používá `ArucoFinder` pro značky základny s ID 1 a 2 a `Homografy` pro převod z obrazu do souřadnic robota.
 
 Mainframe běží výhradně v simulaci. Kontrola kolizí je vypnutá. Prokopův model dál uplatňuje vlastní rozsahy kloubů.
 
 ## Kalibrace pomocí obruče
 
-`homo run` projede pevnou mřížku 3 × 3 ve výškách 225, 300 a 390 mm nad stolem. V každé poloze robot počká na zastavení. Střed obruče v souřadnicích robota se získá z odečtených kloubů a dopředné kinematiky. Střed v pixelech detekuje `Homografy` ve snímku simulované kamery.
+`homo run` počítá s odloženým držákem a tyčí. Robot projede pevnou mřížku 3 × 3 ve výškách 75, 130 a 190 mm nad stolem. V každé poloze počká na zastavení. Střed obruče v souřadnicích robota se získá z odečtených kloubů a dopředné kinematiky. Střed v pixelech detekuje `Homografy` ve snímku simulované kamery.
 
 Snímky `point_XX.png` a `homography.json` s maticí `P` a naměřenými dvojicemi najdeš v `captures/homography_<čas>/`. Konzole vypíše chybu přepočtu na kontrolních bodech. Po úspěšném průjezdu použije `aruco detect` naměřenou matici do ukončení Mainframu. Nová relace začíná se syntetickou kalibrací simulátoru.
 

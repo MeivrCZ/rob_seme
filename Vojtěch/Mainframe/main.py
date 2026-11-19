@@ -17,20 +17,18 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parents[1]
 CAPTURES = ROOT / "captures"
 
-for directory in (REPO / "Prokop", REPO / "Natka", ROOT.parent / "ArucoFinder",
-                  ROOT.parent / "Homografy"):
+for directory in (REPO / "Prokop", ROOT.parent / "ArucoFinder", ROOT.parent / "Homografy"):
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))
 
 from aruco_block_detector import ArucoBlockDetector  # noqa: E402
-from cell import TABLE_Z  # noqa: E402
+from cell import TABLE_Z, WORK_AREA_XY  # noqa: E402
 from homography import Homography  # noqa: E402
 from placement import HOOP_MOUNT, MODELS, load_urdf  # noqa: E402
-from sim_find_and_solve import marker_base_pose, simulated_homography  # noqa: E402
 from simulation import CRS93Sim  # noqa: E402
 from solver.contracts import TurntableModel  # noqa: E402
 from turntable_orbit import (  # noqa: E402
-    MARKER_HEIGHT_ABOVE_TABLE_M, capture_series, draw_orbit, fit_orbit, measure_base,
+    MARKER_HEIGHT_ABOVE_TABLE_M, capture_series, draw_orbit, fit_orbit, measure_base, measure_base_pose,
 )
 
 
@@ -70,12 +68,29 @@ def save_png(path: Path, image: np.ndarray) -> None:
     path.write_bytes(data.tobytes())
 
 
-def capture(robot: CRS93Sim) -> tuple[np.ndarray, Path]:
+def capture(robot: CRS93Sim) -> tuple[np.ndarray, Path, float]:
     image = robot.grab_image()
+    t_capture = time.monotonic() - robot.camera_delay
     path = CAPTURES / f"{capture_stamp()}.png"
     save_png(path, image)
     print(f"Snímek {image.shape[1]} × {image.shape[0]} px uložen do {path}")
-    return image, path
+    return image, path, t_capture
+
+
+def simulated_homography(robot: CRS93Sim) -> Homography:
+    """Fit the initial calibration from the simulator camera's projection."""
+    model = Homography(
+        x_range_m=tuple(WORK_AREA_XY[0]),
+        y_range_m=tuple(WORK_AREA_XY[1]),
+        z_levels_m=(0.03, 0.10, 0.20),
+        table_z_m=TABLE_Z,
+        nx=4,
+        ny=4,
+    )
+    for index, xyz in enumerate(model.points):
+        model.record(index, tuple(robot.camera.project(xyz)), tuple(xyz))
+    model.calculate(validation_fraction=0.0, ransac=False)
+    return model
 
 
 def calibrate_from_hoop(robot: CRS93Sim) -> tuple[Homography, Path]:
@@ -89,7 +104,7 @@ def calibrate_from_hoop(robot: CRS93Sim) -> tuple[Homography, Path]:
     model = Homography(
         x_range_m=(0.415, 0.535),
         y_range_m=(-0.12, 0.12),
-        z_levels_m=(0.225, 0.30, 0.39),
+        z_levels_m=(0.075, 0.13, 0.19),
         table_z_m=TABLE_Z,
         nx=3, ny=3,
         min_circle_diameter_px=180,
@@ -144,7 +159,7 @@ def calibrate_from_hoop(robot: CRS93Sim) -> tuple[Homography, Path]:
 
 def detect_markers(robot: CRS93Sim, detector: ArucoBlockDetector,
                    homography: Homography) -> None:
-    image, raw_path = capture(robot)
+    image, raw_path, t_capture = capture(robot)
     pose = detector.detect(image)
     annotated_path = raw_path.with_name(f"{raw_path.stem}_aruco.png")
     save_png(annotated_path, detector.draw(image, pose))
@@ -153,12 +168,14 @@ def detect_markers(robot: CRS93Sim, detector: ArucoBlockDetector,
         print("Na snímku nebyly nalezeny značky základny (ID 1 a 2).")
         return
 
-    xy, yaw = marker_base_pose(robot, detector, homography, image)
+    marker_z = homography.table_z_m + MARKER_HEIGHT_ABOVE_TABLE_M
+    sample = measure_base_pose(pose, t_capture, homography, marker_z)
     marker_ids = ", ".join(str(marker_id) for marker_id in pose.visible_ids)
     print(f"ArUco ID {marker_ids} | střed v obraze {pose.center_px} px | "
           f"úhel v obraze {pose.angle_deg:+.2f}°")
-    print(f"Základna v souřadnicích robota XY ({xy[0]:.4f}, {xy[1]:.4f}) m | "
-          f"natočení {np.rad2deg(yaw):+.2f}°")
+    x, y = sample.xy
+    print(f"Základna v souřadnicích robota XY ({x:.4f}, {y:.4f}) m | "
+          f"natočení {np.rad2deg(sample.yaw):+.2f}°")
 
 
 def measure_turntable(robot: CRS93Sim, detector: ArucoBlockDetector, homography: Homography,

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from aruco_block_detector import ArucoBlockDetector
+from aruco_block_detector import ArucoBlockDetector, BlockPose
 from homography import Homography
 from solver.contracts import CAMERA_DELAY, BaseMeasurement, TurntableModel
 
@@ -62,11 +62,16 @@ def capture_series(
 
 def measure_base(image: np.ndarray, t_capture: float, detector: ArucoBlockDetector,
                  homography: Homography, marker_z: float) -> BaseMeasurement | None:
-    """Measure the base center and the direction of its x axis in robot XY."""
+    """Detect ArUco markers and measure their base in robot XY."""
     pose = detector.detect(image)
     if pose is None:
         return None
+    return measure_base_pose(pose, t_capture, homography, marker_z)
 
+
+def measure_base_pose(pose: BlockPose, t_capture: float, homography: Homography,
+                      marker_z: float) -> BaseMeasurement:
+    """Map a detected base center and the direction of its x axis to robot XY."""
     markers = np.array([
         [homography.pixel_to_robot(float(u), float(v), marker_z) for u, v in corners]
         for corners in pose.corners_by_id.values()
