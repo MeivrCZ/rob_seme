@@ -219,7 +219,7 @@ start.
   its collision STL, recreates the ring-centre checkpoints and D4/D5 frames in
   metres, and can validate ring clearance against the mesh with `--check-mesh`.
 
-**P2.2 Hoop targets** (HW01 SE3)
+**P2.2 Hoop targets** (HW01 SE3) — **Natka implementation done**
 - `flange_target(checkpoint_T, roll, tilt=0) -> T_flange`: ring centre on the
   checkpoint, ring axis along the tangent (rotated by `tilt`), rotated by `roll`
   about the ring axis; uses the hoop mount (`placement.HOOP_MOUNT`, the adapter
@@ -239,7 +239,7 @@ start.
   solutions, refines near-singular solutions numerically, and selects the
   nearest solution to continue a previous branch.
 
-**P2.4 Safety metrics** (HW04 Jacobian; collision module)
+**P2.4 Safety metrics** (HW04 Jacobian; collision module) — **Natka implementation done**
 - For a configuration: manipulability / smallest singular value of the CRS93
   Jacobian (analytical from the DH, or finite differences as in HW04), distance
   to joint limits, and (via `Prokop/collision.py` with the *estimated* model)
@@ -251,7 +251,7 @@ start.
 - Depends on: P2.3 for test configurations (optional), P3.2 for segment timing
   (fake timing until then).
 
-**P2.5 Roll / branch selection along the path** (HW04 null-space motion; dynamic programming)
+**P2.5 Roll / branch selection along the path** (HW04 null-space motion; dynamic programming) — **Natka implementation done**
 - The task (ring centre + ring axis) has 5 DOF; the roll about the ring axis is
   free and costs no clearance: the robot's 6th DOF is a null-space direction to
   optimize. Discretize roll (e.g. 10°) × IK branch per checkpoint and pick the
@@ -262,7 +262,7 @@ start.
   rolling; result continuous (no branch switch mid-path).
 - Depends on: P2.2, P2.3, P2.4 (fakes for the metric until P2.4 is ready).
 
-**P2.6 Timed plan and start phase** (simulation of the traversal)
+**P2.6 Timed plan and start phase** (simulation of the traversal) — **Natka implementation done**
 - For a start phase θ₀ and speed: arrival times of the checkpoints from
   `RobotTiming` (including the near-stops at bends), puzzle at θ₀ + ω·t, targets
   at the predicted poses (fixed-point iteration: arrival time ↔ target), P2.5 on
@@ -411,7 +411,12 @@ Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`
 | P3.4 corrections | Prokop | **done** (the planned target rotated with the turntable by the phase error; lab-5 numerical IK seeded with the planned q, lab-4 finite-difference Jacobian, lab-1 log map; refuses > 15° or > 20° joint change) | `Prokop/solver/correction.py`, `tests/test_correction.py` |
 | P3.3 executor | Prokop | **done** (approach, wait for the phase, just-in-time commands with corrections, aborts; in the sim with a perfect tracker the hoop target is within 3 mm of its place on the spinning puzzle and arrivals within 30 ms of the prediction, both directions) | `Prokop/solver/executor.py`, `tests/test_executor.py` |
 | P1.2, P1.3, P3.1 | Vojtěch | open | |
-| P2.1–P2.6 | Natka | P2.1, P2.3 done; P2.2, P2.4–P2.6 open | `Natka/crs_puzzle_d_hoop_path.py`, `Natka/plan_ik.py` |
+| P2.1 puzzle path | Natka | **done** (25 checkpoint frames, mesh clearance, final checkpoint identified) | `Natka/crs_puzzle_d_hoop_path.py` |
+| P2.2 hoop targets | Natka | **done** (ring, adapter, and flange targets; tilt and roll) | `Natka/hoop_targets.py` |
+| P2.3 IK layer | Natka | **implemented; to be reviewed by Natka** (analytical solutions, wrist wraps, singularity refinement, branch continuity) | `Natka/plan_ik.py` |
+| P2.4 safety metrics | Natka | **implemented; to be reviewed by Natka** (Jacobian, singular value, manipulability, joint limits, collision clearance) | `Natka/safety_metrics.py` |
+| P2.5 roll/branch selection | Natka | **implemented; to be reviewed by Natka** (roll grid, IK branches, Viterbi-style dynamic programming) | `Natka/selection.py` |
+| P2.6 timed plan | Natka | **implemented; to be reviewed by Natka** (fixed-point timing, phase/direction/speed search, max-min margin plan) | `Natka/planning.py` |
 | P2.8 feasibility funnel | Prokop (proposed) | added 2026-11-18, open | |
 | I1, I2, I3 | Prokop | waiting for P2.6 (planner) and P1.2/P3.1 (perception, tracker); can start on the fakes | |
 
