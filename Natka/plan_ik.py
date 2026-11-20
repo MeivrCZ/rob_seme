@@ -72,12 +72,16 @@ def pose_error(current: np.ndarray, desired: np.ndarray) -> np.ndarray:
     ))
 
 
-def jacobian_finite_difference(
+def jacobian_finite_forward_differences(
     robot: CRS93Kinematics,
     q: ArrayLike,
     delta: float = 1e-6,
 ) -> np.ndarray:
-    """Finite-difference CRS93 flange Jacobian in the robot frame."""
+    """Compute the CRS93 flange Jacobian with finite forward differences.
+
+    Each joint is perturbed only in the positive direction, using
+    (fk(q + delta e_i) - fk(q)) / delta. This form is used by numerical IK.
+    """
     configuration = np.asarray(q, dtype=float)
     if configuration.ndim != 1 or not np.all(np.isfinite(configuration)):
         raise ValueError("q must be a finite one-dimensional configuration")
@@ -115,7 +119,7 @@ def ik_numerical(
         if np.linalg.norm(error) <= acceptable_err:
             return q, True
 
-        jacobian = jacobian_finite_difference(robot, q)
+        jacobian = jacobian_finite_forward_differences(robot, q)
         step = jacobian.T @ np.linalg.solve(
             jacobian @ jacobian.T + damping * np.eye(6), error
         )
