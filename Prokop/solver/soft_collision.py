@@ -26,8 +26,9 @@ Margins are subtracted from the distances: MARGIN for the arm against
 everything, HOOP_PUZZLE_MARGIN (smaller: the ring has ~23 mm around the bar)
 for the hoop against the puzzle, SELF_MARGIN between arm parts. Joint
 neighbours are never checked against each other (their boxes overlap by
-construction; the joint limits keep them apart), and neither is the robot's
-base link against the table (it stands in a cut-out).
+construction; the joint limits keep them apart), nor the pairs in
+SELF_EXCLUDED (cannot touch within the joint limits), nor the robot's base
+link against the table (it stands in a cut-out).
 
 Example:
     ::
@@ -55,6 +56,10 @@ MARGIN = 0.010  # m, arm against the cell, table and task
 HOOP_PUZZLE_MARGIN = 0.003  # m, hoop against the puzzle
 SELF_MARGIN = 0.0  # m, between arm parts (the boxes are already larger)
 REFINE = 0.02  # m, pairs closer than this (margin subtracted) are refined
+# Non-neighbouring parts that cannot touch within the joint limits, not checked
+# either: link 4 and link 6 stay >= 7.9 mm apart over the whole q5 x q6 range
+# (exact meshes, 2026-11-25), but their boxes meet in most wrist poses.
+SELF_EXCLUDED = {frozenset(("link4", "link6"))}
 ARM_ORDER = ("base_link", "link1", "link2", "link3", "link4", "link5", "link6",
              "adapter", "hoop")  # joint neighbours are adjacent here
 
@@ -291,6 +296,8 @@ class SoftScene:
         ri, rj = np.triu_indices(len(roots), 1)
         pr = part_of[self._arm_roots]
         keep = np.abs(pr[ri] - pr[rj]) > 1  # no joint neighbours
+        keep &= np.array([frozenset((ARM_ORDER[a], ARM_ORDER[b])) not in SELF_EXCLUDED
+                          for a, b in zip(pr[ri], pr[rj])])
         self._self_roots = (self._arm_roots[ri[keep]], self._arm_roots[rj[keep]])
         # --- the obstacles: cell, base, puzzle (with its bend as a group) ---
         obs = self.obs = _Tree()
@@ -334,6 +341,105 @@ class SoftScene:
         """All obstacle nodes (leaves first) with the turntable at theta."""
         self._pose_obstacles(theta)
         return self._obs_boxes
+
+    SWEPT_SIDES = 4  # boxes per swept cylinder, rotated by 90 / SWEPT_SIDES deg (a 16-gon)
+
+    def _swept_boxes(self) -> tuple[Boxes, np.ndarray, list[str]]:
+        """Boxes enclosing the volume the task sweeps in a full turn (cached).
+
+        Every task box (turntable, base, puzzle) sweeps a cylinder about the
+        turntable axis: radius = its farthest corner, height = its own. Each
+        cylinder lies in the intersection of SWEPT_SIDES boxes rotated against
+        each other. Returns the boxes (SWEPT_SIDES per cylinder, consecutive),
+        which cylinders are the puzzle's, and the cylinders' names.
+        """
+        if getattr(self, "_swept", None) is not None:
+            return self._swept
+        self._pose_obstacles(0.0)
+        signs = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)])
+        task = np.flatnonzero(np.array(self.obs.tag) != "cell")
+        task = task[task < len(self._obs_leaves)]  # the leaf boxes only
+        sources = [(self._obs_boxes, k, str(self.obs.name[k]), self.obs.tag[k] == "puzzle")
+                   for k in task]
+        sources += [(self._tt_boxes, k, "turntable", False) for k in range(len(self._tt_boxes))]
+        axis = np.asarray(self.model.axis_xy, float)
+        c, R, h, is_puzzle, names = [], [], [], [], []
+        for boxes, k, name, puzzle in sources:
+            corners = boxes.c[k] + (signs * boxes.h[k]) @ boxes.R[k].T
+            radius = float(np.linalg.norm(corners[:, :2] - axis, axis=1).max())
+            z0, z1 = corners[:, 2].min(), corners[:, 2].max()
+            for side in range(self.SWEPT_SIDES):
+                a = side * (np.pi / 2) / self.SWEPT_SIDES
+                c.append([axis[0], axis[1], (z0 + z1) / 2])
+                R.append([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+                h.append([radius, radius, (z1 - z0) / 2])
+            is_puzzle.append(puzzle)
+            names.append(f"{name} (swept)")
+        self._swept = (Boxes(np.array(c), np.array(R), np.array(h)), np.array(is_puzzle), names)
+        return self._swept
+
+    def swept_clearance(self, q: np.ndarray) -> tuple[float, tuple[str, str]]:
+        """Least distance of the arm to the volume the task sweeps in a full turn.
+
+        For a pose the robot holds while the turntable turns (waiting for the
+        puzzle to come round). Margins as in clearance(); a lower bound.
+
+        Returns:
+            Distance [m] (<= 0: too close) and the pair (arm box, swept body).
+        """
+        arm = self.arm_boxes(q)
+        swept, is_puzzle, names = self._swept_boxes()
+        leaves = self._arm_leaves
+        k = self.SWEPT_SIDES
+        n_cyl = len(names)
+        ia = np.repeat(leaves, n_cyl * k)
+        ib = np.tile(np.arange(n_cyl * k), len(leaves))
+        gaps = box_gaps(arm, swept, ia, ib).reshape(len(leaves), n_cyl, k).max(axis=2)
+        margin = np.where(self._arm_is_hoop[leaves][:, None] & is_puzzle[None, :],
+                          self.hoop_puzzle_margin, self.margin)
+        gaps = gaps - margin
+        a, b = np.unravel_index(int(np.argmin(gaps)), gaps.shape)
+        return float(gaps[a, b]), (str(self.arm.name[leaves[a]]), names[b])
+
+    def task_reach(self, theta: float) -> float:
+        """Largest distance of the turntable, base and puzzle boxes from the turntable axis [m].
+
+        With the turntable at omega, no task point moves faster than omega times this.
+        """
+        self._pose_obstacles(theta)
+        signs = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)])
+        reach = 0.0
+        task = np.flatnonzero(np.array(self.obs.tag) != "cell")
+        for b, idx in ((self._obs_boxes, task),
+                       (self._tt_boxes, np.arange(len(self._tt_boxes)))):
+            corners = b.c[idx, None] + np.einsum("nij,nkj->nki", b.R[idx],
+                                                 signs[None] * b.h[idx, None])
+            reach = max(reach, float(np.linalg.norm(corners[..., :2] - self.model.axis_xy,
+                                                    axis=2).max()))
+        return reach
+
+    def lever_arms(self, q: np.ndarray) -> np.ndarray:
+        """Per joint, the largest distance of any box it moves from its axis point [m], (6,).
+
+        A joint change dq_k moves no point of the arm further than r_k |dq_k|, so
+        sum_k r_k |dq_k| bounds the motion of every arm point (for small changes;
+        callers keep a slack). Uses the distance to the axis POINT, which is at
+        least the distance to the axis line.
+        """
+        q = np.asarray(q, dtype=float)
+        frames = link_frames(q)
+        leaves = self._arm_leaves
+        M = np.array([frames[link] for link in self._links])[self.arm.frame[leaves]] \
+            @ self.arm.local[leaves]
+        signs = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)])
+        local = signs[None] * self.arm.half[leaves][:, None]  # (n, 8, 3)
+        corners = M[:, None, :3, 3] + np.einsum("nij,nkj->nki", M[:, :3, :3], local)
+        part = self._arm_part[leaves]
+        r = np.zeros(6)
+        for k in range(1, 7):  # joint k moves link k and everything after it
+            moved = corners[part >= k].reshape(-1, 3)
+            r[k - 1] = np.linalg.norm(moved - frames[f"link{k}"][:3, 3], axis=1).max()
+        return r
 
     # --- hierarchical search ---
 
@@ -421,6 +527,8 @@ class SoftScene:
         si, sj = np.triu_indices(len(self._arm_leaves), 1)
         part = self._arm_part
         keep = np.abs(part[si] - part[sj]) > 1
+        keep &= np.array([frozenset((ARM_ORDER[a], ARM_ORDER[b])) not in SELF_EXCLUDED
+                          for a, b in zip(part[si], part[sj])])
         selfg = box_gaps(arm, arm, si[keep], sj[keep])
         return {"table": table, "cell": float(env[cell].min()),
                 "task": float(min(env[~cell].min(), tt.min())), "self": float(selfg.min())}

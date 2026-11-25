@@ -4,7 +4,9 @@ The wire is a 10 x 10 mm square bar. Its centreline lies in the puzzle frame's
 x-z plane (measured on models/meshes/puzzle_D.stl, the same as the drawing):
 
 * the top bar at z = 155 mm, from the open end at x = 85 mm to x = 35 mm
-  (the path starts ENTRY_OUTSIDE before the open end, outside the bar);
+  (the path starts `entry` before the open end, outside the bar: default
+  ENTRY_OUTSIDE; the planner moves it out until the robot can wait there
+  clear of the volume the spinning puzzle sweeps);
 * the R50 quarter bend, centre (35, 105) mm, down to vertical at x = -15 mm;
 * the vertical run down to z = 45 mm;
 * the 45 deg jog to x = 0 at z = 30 mm;
@@ -104,15 +106,20 @@ class Arc:
         return sign * np.array([-np.sin(a), 0.0, np.cos(a)])
 
 
-SEGMENTS: tuple[Line | Arc, ...] = (
-    Line(np.array([OPEN_END_X + ENTRY_OUTSIDE, 0.0, TOP_Z]),
-         np.array([ARC_CENTRE[0], 0.0, TOP_Z])),                       # top bar
-    Arc(ARC_CENTRE, ARC_RADIUS, np.pi / 2, np.pi),                     # the bend
-    Line(np.array([ARC_CENTRE[0] - ARC_RADIUS, 0.0, ARC_CENTRE[2]]),
-         np.array([ARC_CENTRE[0] - ARC_RADIUS, 0.0, JOG_TOP_Z])),      # vertical run
-    Line(np.array([ARC_CENTRE[0] - ARC_RADIUS, 0.0, JOG_TOP_Z]), JOG_BOTTOM),  # jog
-    Line(JOG_BOTTOM, np.array([0.0, 0.0, END_Z])),                     # stem
-)
+def segments(entry: float = ENTRY_OUTSIDE) -> tuple[Line | Arc, ...]:
+    """The wire's segments, the path starting @entry [m] before the open end."""
+    return (
+        Line(np.array([OPEN_END_X + entry, 0.0, TOP_Z]),
+             np.array([ARC_CENTRE[0], 0.0, TOP_Z])),                       # top bar
+        Arc(ARC_CENTRE, ARC_RADIUS, np.pi / 2, np.pi),                     # the bend
+        Line(np.array([ARC_CENTRE[0] - ARC_RADIUS, 0.0, ARC_CENTRE[2]]),
+             np.array([ARC_CENTRE[0] - ARC_RADIUS, 0.0, JOG_TOP_Z])),      # vertical run
+        Line(np.array([ARC_CENTRE[0] - ARC_RADIUS, 0.0, JOG_TOP_Z]), JOG_BOTTOM),  # jog
+        Line(JOG_BOTTOM, np.array([0.0, 0.0, END_Z])),                     # stem
+    )
+
+
+SEGMENTS = segments()
 SEGMENT_NAMES = ("top bar", "bend", "vertical run", "jog", "stem")
 
 
@@ -125,42 +132,52 @@ def checkpoint_frame(position: np.ndarray, travel: np.ndarray) -> np.ndarray:
     return T
 
 
-def wire_points(tier: int = 0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def wire_points(tier: int = 0, entry: float = ENTRY_OUTSIDE, bend_points: int | None = None
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Checkpoint positions and directions of travel at a granularity tier.
 
     Args:
         tier: 0 = only the segment ends; each tier halves every interval.
+        entry: Where the path starts, before the open end [m].
+        bend_points: Instead of tiers: only the segment ends, and this many
+            checkpoints on the bend (its two ends included; e.g. 3 or 5).
 
     Returns:
         Positions [m] (N, 3), unit directions of travel (N, 3), and the
         segment index of each interval ending at checkpoint k (N,; -1 at 0).
     """
     assert tier >= 0, "tier must be >= 0"
-    n = 2 ** tier
+    assert bend_points is None or bend_points >= 2, "the bend has at least its two ends"
     points, travel, segment = [], [], []
-    for k, seg in enumerate(SEGMENTS):
+    segs = segments(entry)
+    for k, seg in enumerate(segs):
+        if bend_points is None:
+            n = 2 ** tier
+        else:
+            n = bend_points - 1 if k == 1 else 1
         for j in range(0 if k == 0 else 1, n + 1):
             u = j / n
             t = seg.tangent(u)
-            if j == n and k + 1 < len(SEGMENTS):  # a joint: bisect when there is a corner
-                t = t + SEGMENTS[k + 1].tangent(0.0)
+            if j == n and k + 1 < len(segs):  # a joint: bisect when there is a corner
+                t = t + segs[k + 1].tangent(0.0)
             points.append(seg.point(u))
             travel.append(t / np.linalg.norm(t))
             segment.append(-1 if (k == 0 and j == 0) else k)
     return np.array(points), np.array(travel), np.array(segment)
 
 
-def wire_path(tier: int = 0) -> PuzzlePath:
-    """The PuzzlePath of puzzle D at a granularity tier (see the module doc)."""
-    points, travel, _ = wire_points(tier)
+def wire_path(tier: int = 0, entry: float = ENTRY_OUTSIDE,
+              bend_points: int | None = None) -> PuzzlePath:
+    """The PuzzlePath of puzzle D at a granularity tier, or with bend_points (wire_points)."""
+    points, travel, _ = wire_points(tier, entry, bend_points)
     frames = np.array([checkpoint_frame(p, t) for p, t in zip(points, travel)])
     return PuzzlePath(frames=frames, clearance=np.full(len(frames), RING_CLEARANCE),
                       roll_limits=None, final_index=len(frames) - 1)
 
 
-def segment_of(tier: int) -> np.ndarray:
+def segment_of(tier: int, bend_points: int | None = None) -> np.ndarray:
     """Segment index of the move into each checkpoint (-1 for checkpoint 0)."""
-    return wire_points(tier)[2]
+    return wire_points(tier, bend_points=bend_points)[2]
 
 
 def ring_top_above_pad(ring: np.ndarray) -> float:
@@ -174,3 +191,28 @@ def ring_top_above_pad(ring: np.ndarray) -> float:
     top = (ring[2, 3] + max(0.0, -RING_THICKNESS * n[2])
            + RING_OUTER_RADIUS * np.sqrt(max(0.0, 1.0 - n[2] ** 2)))
     return float(top - PAD_TOP_Z)
+
+
+def checkpoint_arclengths(tier: int = 0, entry: float = ENTRY_OUTSIDE,
+                          bend_points: int | None = None) -> np.ndarray:
+    """Distance along the wire [m] of every checkpoint (as wire_points places them)."""
+    segs = segments(entry)
+    starts = np.concatenate(([0.0], np.cumsum([seg.length for seg in segs])))
+    out = []
+    for k, seg in enumerate(segs):
+        n = (2 ** tier) if bend_points is None else (bend_points - 1 if k == 1 else 1)
+        for j in range(0 if k == 0 else 1, n + 1):
+            out.append(starts[k] + seg.length * j / n)
+    return np.array(out)
+
+
+def wire_frame_at(s: float, entry: float = ENTRY_OUTSIDE) -> np.ndarray:
+    """Checkpoint frame (contracts' convention) at distance s [m] along the wire."""
+    segs = segments(entry)
+    s = float(np.clip(s, 0.0, sum(seg.length for seg in segs)))
+    for seg in segs:
+        if s <= seg.length or seg is segs[-1]:
+            u = min(1.0, s / seg.length)
+            return checkpoint_frame(seg.point(u), seg.tangent(u))
+        s -= seg.length
+    raise AssertionError("unreachable")

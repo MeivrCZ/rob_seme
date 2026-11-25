@@ -120,8 +120,8 @@ The extra keyword arguments exist in the sim only:
 The team's pipeline for the task, planned in
 [docs/SOLVER_PLAN.md](docs/SOLVER_PLAN.md): (1) the turntable with the base and
 puzzle estimated as a one-joint robot from camera images, (2) a plan optimized
-over the whole timed traversal (start phase, hoop roll, IK branch), screened
-first by a feasibility funnel, (3) execution with the turntable's phase tracked
+over the whole timed traversal (start phase, hoop roll, IK branch; Natka's
+code in `Natka/`, which `solver/__init__.py` puts on the import path), (3) execution with the turntable's phase tracked
 by a delay-aware Kalman filter. The three of us work on its tasks in parallel;
 the parts exchange only the types of `solver/contracts.py`, which also holds
 fakes so that every part can be developed alone. Every part uses only the
@@ -134,12 +134,13 @@ Prokop's parts so far:
 | `solver/contracts.py` | C0 | shared types (`BaseMeasurement`, `TurntableModel`, `PuzzlePath`, `RobotTiming`, `PhaseEstimate`, `PhaseTracker`, `Plan`), the reference turntable chain, fakes; under review by the team |
 | `solver/turntable_chain.py` | P1.1 | the turntable, base, puzzle and checkpoints as a one-joint URDF robot (lab 2); FK of every frame |
 | `solver/timing.py` | P3.2 | the robot's measured timing; `schedule()` gives the arrival times of queued moves, with blending |
-| `solver/approach.py` | P2.7 | collision-free approach paths: RRT + random shortcut (lab 6) against the cell, the table, the spinning task's swept volume and self-collision |
-| `solver/correction.py` | P3.4 | planned targets corrected for the turntable's actual phase: numerical IK (lab 5), finite-difference Jacobian (lab 4) |
+| `solver/approach.py` | P2.7 | collision-free approach paths: straight task-space line (`plan_line`, IK from Natka's `plan_ik`) checked against the cell, the table, the spinning task's swept volume and self-collision |
+| `solver/correction.py` | P3.4 | planned targets corrected for the turntable's actual phase (Natka's numerical IK, `plan_ik.ik_numerical`) |
 | `solver/executor.py` | P3.3 | runs a `Plan`: approach, wait for the start phase, send each step just in time with its correction, abort safely |
 | `solver/soft_collision.py` | — | soft collision model for planning: boxes from `models/soft/*_soft.urdf`, separating-axis distances (lower bounds), hierarchy; see [docs/SOFT_COLLISION.md](docs/SOFT_COLLISION.md) |
 | `solver/wire.py` | — | puzzle D's wire (centreline measured on the CAD) and its checkpoints at a granularity tier |
 | `solver/hoop_pose.py` | — | flange poses that put the ring centre on a checkpoint (side, tilt, roll); IK candidates |
+| `run_solver.py` | I1 | the whole pipeline phase by phase in the sim (Vojtěch's perception, Natka's planner, our parts), each phase checked against the sim's truth; stops at the first failing phase. `uv run Prokop/run_solver.py --seed 3 --direction -1 [--stop-after 2] [--hold]`; log + frames in `Prokop/runs/` |
 
 In the sim with the puzzle spinning (both directions) and a perfect tracker, the
 executor keeps the hoop target within 3 mm of its planned place on the puzzle,
@@ -161,6 +162,7 @@ from solver.timing import RobotTiming
 | [docs/ROBOT_CHECKS.md](docs/ROBOT_CHECKS.md) | safety rules, running the tools at the station, open checks |
 | [docs/SOLVER_PLAN.md](docs/SOLVER_PLAN.md) | the team's solver: pipeline, contracts, decisions, lab methods, tasks, split and status |
 | [docs/SOFT_COLLISION.md](docs/SOFT_COLLISION.md) | the soft collision model for planning: boxes, test, margins, validation |
+| [docs/PLANNER_EXPERIMENTS.md](docs/PLANNER_EXPERIMENTS.md) | planning: every experiment, test and solved problem (static and spinning puzzle), open ideas, scripts |
 | [NOTIFY.md](NOTIFY.md) | notes for the team about changes that affect their code |
 
 The modules and tools have Google-style docstrings; `--help` on any tool prints

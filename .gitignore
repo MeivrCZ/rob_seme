@@ -7,3 +7,6 @@ __pycache__/
 
 # demo outputs (Prokop/demo_camera.py)
 Prokop/demo_output/
+
+# solver runs (Prokop/run_solver.py)
+Prokop/runs/

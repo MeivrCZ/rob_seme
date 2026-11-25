@@ -61,7 +61,7 @@ camera image ─► P1.2 measurement ─┐     P2.1 path in puzzle frame ──
                                   ├► P1.3 fit ─► TurntableModel ─────► P2.6 ─► Plan ─► P3.3 executor ─► robot
 P1.1 turntable kinematic chain ───┘     P2.2–P2.5 targets, IK,      │          ▲   P3.4 corrections
      (FK(θ) → puzzle, checkpoints)           safety, roll choice ───┘          │   P3.2 robot timing model
-                                        P2.7 approach (RRT) ───────────────────┘
+                                        P2.7 approach (line) ──────────────────┘
 ```
 
 - **Phase 1** takes images for ~a quarter turn and fits the
@@ -69,10 +69,8 @@ P1.1 turntable kinematic chain ───┘     P2.2–P2.5 targets, IK,      �
   gives the pose of the puzzle and of every checkpoint for any θ, plus θ(t).
 - **Phase 2** searches for the safest plan: start configuration, start phase θ₀,
   the hoop roll at every checkpoint, the IK branch; simulated over the whole
-  timed traversal (the puzzle keeps turning). A feasibility funnel (reach, IK
-  map, θ₀ screening; P2.8) runs first, so the expensive search only sees
-  candidates that can work, and "unreachable" comes with a reason. Output: a
-  `Plan`, or "unreachable".
+  timed traversal (the puzzle keeps turning). Output: a `Plan`, or
+  "unreachable" with a reason.
 - **Phase 3** approaches, waits for θ₀, walks the checkpoints with targets placed
   at the puzzle's predicted pose at arrival (Kalman filter on θ, aware of the
   camera delay), corrects small errors, and lowers the hoop at the end.
@@ -97,8 +95,9 @@ reference) are in its module docstring.
 
 Fakes, so that nobody waits for anybody: `example_model()`,
 `fake_measurements(model, times, noise, …)` (with one-marker and missing
-detections), `example_path()` (a simplified puzzle-D-like path; the real one is
-P2.1), `example_plan()`.
+detections), `example_plan()`. The puzzle path is Natka's real one (P2.1,
+`crs_puzzle_d_hoop_path.puzzle_path_contract()`; `example_path()` was removed
+2026-11-24).
 
 `TurntableModel.puzzle_T(θ)` is the reference chain: robot frame → axis on the
 table → rotation θ → turntable top → base (offset, yaw, on its foam) →
@@ -137,11 +136,12 @@ Taken while drafting the contracts (**open for review**):
 | C5 | `PuzzlePath.clearance` is the radial ring↔puzzle clearance with the ring perpendicular to the path; `roll_limits = None` means the roll is free. | clearance as a function of roll and tilt |
 | C6 | `PlanStep.margin` is one number (> 0 safe), its definition belongs to P2.4. | separate margins (singularity, joint limits, clearance) |
 | C7 | `RobotTiming` is a protocol (only the two methods), implemented by P3.2; `PhaseEstimate.omega` is signed. | a concrete class in the contracts |
-| C8 | `example_path()` is a simplified puzzle-D-like path (straight in, R50 bend, straight down), not the real puzzle D (that is P2.1); `example_plan()` is arbitrary small moves near `q_home`. | — |
+| C8 | `example_plan()` is arbitrary small moves near `q_home`. (`example_path()`, a simplified puzzle-D-like path, was removed 2026-11-24: P2.1's real path is used everywhere.) | — |
 | C9 | The constants `SPIN_PERIOD` (28.0 s), `OMEGA`, `CAMERA_DELAY` (0.11 s) are repeated in the contracts so that other parts need not import the simulator. | import them from `simulation` / `view_models` |
 | C10 | The contracts live in the package `Prokop/solver/` and import `cell` and `placement` (the URDF frames); users put `Prokop/` on `sys.path`. | a standalone module with the frames copied in |
 | C11 | `PhaseTracker` protocol (one method, `estimate() -> PhaseEstimate`): the tracker grabs and processes images itself; the executor only reads the latest estimate. Fake: `ModelTracker(model)` (perfect). Added for P3.3. | the executor passes measurements to the tracker |
 | C12 | `PlanStep.t_rel` is the arrival time after the first traversal command is sent at `theta_start`, with the steps queued back to back (`RobotTiming.schedule`); the planned angle at arrival is `theta_start + direction·ω·t_rel`. The executor keeps the next command queued just in time, which reproduces this timing. | each step sent only after the previous one arrived (slower: a command delay of 0.12 s per step) |
+| C13 | **Decided 2026-11-22.** Ring target = checkpoint_T · Rx(π) · Rz(roll), i.e. the hoop's −z leads along the direction of travel: **side B** (the flat side of the ring facing away from the robot in `q_home`). Only this side is used: with side A leading (hoop +z along the travel, the URDF's default) the arm ends far too close to the table at the bottom of the path; in the 12 of 16 test placements where the (since removed) funnel searched both sides and found a path, its best path used side B at every checkpoint, and the planner with side A only found no plan in any of them. Implemented by P2.2 (Natka's `hoop_targets.checkpoint_ring_target`, still side A as of 2026-11-24: NOTIFY; `Prokop/natka_copy/` has the one-line fix). | both sides searched |
 
 ## 5. Methods from the robotics labs
 
@@ -156,7 +156,7 @@ of our homework on 2026-11-18 (`pytest tests/hwXX`).
 | Lab 3 / HW03: ArUco detection, marker pose, homography from hoop images (Hough circles + `cv2.findHomography`) | `utils/perception.py` (`find_hoop_homography`); exercises `lab03/01_detect_aruco.py`, `02_aruco_se3.py`, `03_homography.py` | passes | base measurement from an image (P1.2), camera calibration |
 | Lab 4 / HW04: Jacobian (analytical and finite differences), null-space motion | `robots/planar_manipulator.py` (`jacobian`, `jacobian_finite_difference`), `robots/spatial_manipulator.py` (`jacobian`, geometric 6×n); exercise `lab04/02_null_space_motion_spatial.py` | **fails 2 of 3** | singularity metric (P2.4), the free hoop roll as a null-space direction (P2.5), corrections (P3.4) |
 | Lab 5 / HW05: numerical IK (iterative, Jacobian-based) and analytical IK with all solutions | `robots/planar_manipulator.py` (`ik_numerical`, `ik_analytical`); exercises `lab05/01_numerical_ik.py`, `02_analytical_ik.py` | **fails 2 of 3** (optional 1 of 1) | the IK layer: all analytical solutions + numerical refinement near singularities (P2.3), corrections (P3.4) |
-| Lab 6 / HW06: RRT with goal bias, random shortcut; PRM | `planning/rrt.py` (`plan`, `random_shortcut`), `planning/prm.py`, `utils/configuration_utils.py` (`distance_between_configurations`, `interpolate`) | **RRT fails 1 of 2** (optional) | approach and retreat paths (P2.7) |
+| Lab 6 / HW06: RRT with goal bias, random shortcut; PRM | `planning/rrt.py` (`plan`, `random_shortcut`), `planning/prm.py`, `utils/configuration_utils.py` (`distance_between_configurations`, `interpolate`) | **RRT fails 1 of 2** (optional) | approach and retreat paths (P2.7) until 2026-11-22; replaced by a straight task-space line (lab 1 exp/log) |
 | — | (not in the labs) | — | Kalman filter (P3.1), least-squares fit (P1.3), dynamic programming over the roll (P2.5) |
 
 For an AI assistant working on a task: give it the matching file above (and the
@@ -222,7 +222,7 @@ start.
 **P2.2 Hoop targets** (HW01 SE3) — **Natka implementation done**
 - `flange_target(checkpoint_T, roll, tilt=0) -> T_flange`: ring centre on the
   checkpoint, ring axis along the tangent (rotated by `tilt`), rotated by `roll`
-  about the ring axis; uses the hoop mount (`placement.HOOP_MOUNT`, the adapter
+  about the ring axis, with side B of the hoop leading (C13); uses the hoop mount (`placement.HOOP_MOUNT`, the adapter
   turned 180°, `models/crs93.urdf`).
 - Tests: FK of the URDF with the hoop at IK(target) puts the ring centre on the
   checkpoint and its axis along the tangent; roll does not move the ring centre.
@@ -266,56 +266,38 @@ start.
 - For a start phase θ₀ and speed: arrival times of the checkpoints from
   `RobotTiming` (including the near-stops at bends), puzzle at θ₀ + ω·t, targets
   at the predicted poses (fixed-point iteration: arrival time ↔ target), P2.5 on
-  that moving target sequence, margins along all segments. Search only the θ₀
-  candidates that passed the feasibility funnel (P2.8), best first, for both
-  directions; pick the max-min margin plan. No feasible θ₀ →
-  `Plan(feasible=False, reason=...)` (the assignment's "report unreachable"),
-  with P2.8's reason when the screening already failed.
+  that moving target sequence, margins along all segments. Search the θ₀
+  candidates for both directions; pick the max-min margin plan. No feasible
+  θ₀ → `Plan(feasible=False, reason=...)` (the assignment's "report
+  unreachable").
 - Tests: on `example_model()` returns a feasible plan; on a placement out of
   reach returns infeasible with a reason; the plan's own replay (FK at the
   predicted times) keeps the ring on the path within the clearance.
-- Depends on: P2.1–P2.5, P2.8, P1.1, P3.2.
+- Depends on: P2.1–P2.5, P1.1, P3.2.
 
-**P2.7 Approach and retreat paths** (HW06 RRT + random shortcut)
-- Collision-free joint-space path q_home → `q_start` (and back), checked with
-  `collision.ArmChecker` plus the turntable's swept volume
-  (`placement.TaskScene.swept_task_mesh`), since the puzzle rotates while we
-  approach. A straight joint-space move when it is free; RRT + shortcut
-  otherwise.
-- Tests: free straight case; a case needing a detour; respects joint limits.
+**P2.7 Approach and retreat paths** (HW01 SO3 exp/log; straight task-space line)
+- The work area lies right below `q_home`, so the approach is a straight line
+  in task space (decided 2026-11-22, replaces the RRT): the ring-centre frame
+  moves from its pose at `q_home` to its pose at `q_start` with position and
+  rotation interpolated separately, p(s) = p₀ + s(p₁ − p₀),
+  R(s) = R₀·exp(s·log(R₀ᵀR₁)), s ∈ [0, 1] (not the SE3 screw motion, whose
+  position follows a helix). For now s only places the samples (every 2 cm /
+  5°, one `move_to_q` each); it can later carry the timing.
+- At every sample the IK solution nearest to the previous configuration (one
+  branch); refused with a reason if a sample is unreachable, a joint jumps
+  > 20° (branch switch, singularity), the line ends on another branch than
+  `q_start`, or a segment hits the cell, the table, the swept volume of the
+  spinning task (`collision.ArmChecker` + `placement.TaskScene.swept_task_mesh`)
+  or the arm itself.
+- Tests: the ring is on the line at every sample; position straight under a
+  large rotation; another branch is refused; an obstacle on the line is named.
 - Depends on: C0; independent of the rest of P2.
 
-**P2.8 Feasibility funnel: fast screening before the search** (HW05 analytical IK, HW02 FK)
-- Why: without it, P2.6 runs the full timed simulation (IK, metrics, collision
-  meshes) for every θ₀ and learns that a placement is unreachable only when all
-  of them fail: slow, and without a reason. The funnel filters with cheap
-  checks first; only the survivors get the expensive treatment.
-- Stage A, reach (µs): for each checkpoint, is its wrist centre within the
-  arm's reach (distance from the shoulder within [r_min, r_max]) for some roll
-  and some θ? The roll is free, so the wrist centre lies on a circle around the
-  ring axis; the turntable moves the checkpoint on a circle around its axis. A
-  checkpoint that fails for every θ → infeasible at once: "checkpoint i out of
-  reach".
-- Stage B, IK feasibility map (~seconds): for each checkpoint i × turntable angle
-  θ (e.g. 5° grid) × roll (e.g. 15° grid), the analytical IK solutions within
-  the joint limits (`ctu_crs` `ik`, ~50 µs each; ~25 × 72 × 24 ≈ 43 000 calls ≈
-  2 s), with a cheap singularity flag (|q5| small, elbow stretched). Computed
-  once per placement and cached; reused by P2.5/P2.6.
-- Stage C, θ₀ screening: with nominal arrival times tᵢ (timing model, straight
-  moves), keep the θ₀ for which every checkpoint i has a feasible entry at
-  θ₀ + direction·ω·tᵢ, and consecutive checkpoints have entries with a small
-  joint change (a coarse version of P2.5's graph). Output: the candidate θ₀,
-  ranked by how many options and how far from singularities they leave, or
-  infeasible with the reason (which checkpoint fails at which angles).
-- By-product for the report: stages A–C take seconds per placement, so they can
-  sweep the whole work area × both directions for a reachability map long
-  before the full pipeline works (feeds I2).
-- Tests: `example_model()` has candidates; a placement out of reach is
-  infeasible at stage A with the checkpoint named; no false negatives: every θ₀
-  that P2.6 accepts on the grid is among stage C's candidates.
-- Depends on: P2.1 (`example_path()` until then), P2.2 (a simple target
-  function until then), P2.3 (the analytical IK of `ctu_crs` is enough to
-  start), P1.1, P3.2.
+**P2.8 Feasibility funnel** — **removed 2026-11-24.** It duplicated P2.2,
+P2.3, P2.5 and P2.6 (its own ring targets, vectorized IK, start-phase walk), and
+the team builds on Natka's planning code. The last version is in git
+(`Prokop/solver/feasibility.py`, `solver/ik_batch.py`, commit 8bf7cc9 plus the
+uncommitted side-B change).
 
 ### Phase 3: execution
 
@@ -373,16 +355,15 @@ C0 contracts + fakes
  ├─► P1.1 chain ───────────────┬─► P1.3 fit ──────────────► P3.1 Kalman ─────────────┐
  ├─► P1.2 measurement ─────────┘   (noise model) ─────────────────▲                    │
  ├─► P2.1 path ─► P2.2 targets ─┐                                                       │
- ├─► P2.3 IK ───────────────────┼─► P2.8 funnel ─► P2.5 roll/branch ─► P2.6 plan ──┐    │
+ ├─► P2.3 IK ───────────────────┼─► P2.5 roll/branch ─► P2.6 plan ──────────────────┐    │
  ├─► P2.4 metrics ──────────────┘                                      ▲           ├─► I1/I2 ─► I3
  ├─► P3.2 timing ──────────────────────────────────────────────────────┴─► P3.3 executor ◄─ P3.4
- └─► P2.7 approach (RRT) ──────────────────────────────────────────────────────────┘
+ └─► P2.7 approach (line) ─────────────────────────────────────────────────────────┘
 ```
 
 After C0, everything except P1.3, P2.5, P2.6, P3.3 can start at once; those
 four start on fakes and switch to the real inputs when available. Critical path:
-P2.1 → P2.2/P2.3 → P2.8 → P2.5 → P2.6 → integration. P2.8 can start right away
-on the fakes and the `ctu_crs` IK.
+P2.1 → P2.2/P2.3 → P2.5 → P2.6 → integration.
 
 ## 8. Split (approved 2026-11-18)
 
@@ -392,10 +373,10 @@ Balanced by size and matched to what everyone already does:
 |---|---|---|---|
 | 1st | P1.2 measurement | P2.1 path | C0 contracts + fakes (with all) |
 | 2nd | P1.3 turntable fit | P2.3 IK layer | P1.1 chain, P3.2 timing |
-| 3rd | P3.1 Kalman tracker | P2.2 targets, P2.4 metrics | P2.7 approach (RRT) |
+| 3rd | P3.1 Kalman tracker | P2.2 targets, P2.4 metrics | P2.7 approach (line) |
 | 4th | camera calibration on the robot | P2.5 roll/branch, P2.6 plan | P3.3 executor, P3.4 |
 | then | estimation accuracy experiments | planning experiments | I1, I2, I3 |
-| added | | | P2.8 feasibility funnel (proposed, to confirm) |
+| added | | | P2.8 feasibility funnel (removed 2026-11-24: duplicated P2.2–P2.6) |
 
 Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`,
 `Prokop/solver/…`); only `Prokop/solver/contracts.py` is shared.
@@ -407,8 +388,8 @@ Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`
 | C0 contracts + fakes | Prokop (+ review by all) | drafted, **under review** | `Prokop/solver/contracts.py`, `tests/test_contracts.py` |
 | P1.1 turntable chain | Prokop | **done** (URDF chain, FK equals the reference to 1e-9; ~0.1 ms per frame) | `Prokop/solver/turntable_chain.py`, `tests/test_turntable_chain.py` |
 | P3.2 robot timing | Prokop | **done** (equals `CRS93Sim` and the real logs; `schedule()` times queued moves with blending) | `Prokop/solver/timing.py`, `tests/test_timing.py` |
-| P2.7 approach (RRT) | Prokop | **done** (lab-6 RRT + random shortcut, local sampling first; 3–6 s for a detour, straight moves at once) | `Prokop/solver/approach.py`, `tests/test_approach.py` |
-| P3.4 corrections | Prokop | **done** (the planned target rotated with the turntable by the phase error; lab-5 numerical IK seeded with the planned q, lab-4 finite-difference Jacobian, lab-1 log map; refuses > 15° or > 20° joint change) | `Prokop/solver/correction.py`, `tests/test_correction.py` |
+| P2.7 approach (line) | Prokop | **done** 2026-11-22 (straight task-space line, RRT removed; `plan_line` on Natka's `plan_ik`, ~0.2 s, ≤ 0.2 mm off the line between samples) | `Prokop/solver/approach.py`, `tests/test_approach.py` |
+| P3.4 corrections | Prokop | **done** (the planned target rotated with the turntable by the phase error; Natka's numerical IK (`plan_ik.ik_numerical`) seeded with the planned q; refuses > 15° or > 20° joint change) | `Prokop/solver/correction.py`, `tests/test_correction.py` |
 | P3.3 executor | Prokop | **done** (approach, wait for the phase, just-in-time commands with corrections, aborts; in the sim with a perfect tracker the hoop target is within 3 mm of its place on the spinning puzzle and arrivals within 30 ms of the prediction, both directions) | `Prokop/solver/executor.py`, `tests/test_executor.py` |
 | P1.2, P1.3, P3.1 | Vojtěch | open | |
 | P2.1 puzzle path | Natka | **done** (25 checkpoint frames, mesh clearance, final checkpoint identified) | `Natka/crs_puzzle_d_hoop_path.py` |
@@ -417,8 +398,9 @@ Each person keeps their code in their own directory (`Vojtěch/…`, `Natka/…`
 | P2.4 safety metrics | Natka | **implemented; to be reviewed by Natka** (Jacobian, singular value, manipulability, joint limits, collision clearance) | `Natka/safety_metrics.py` |
 | P2.5 roll/branch selection | Natka | **implemented; to be reviewed by Natka** (roll grid, IK branches, Viterbi-style dynamic programming) | `Natka/selection.py` |
 | P2.6 timed plan | Natka | **implemented; to be reviewed by Natka** (fixed-point timing, phase/direction/speed search, max-min margin plan) | `Natka/planning.py` |
-| P2.8 feasibility funnel | Prokop (proposed) | added 2026-11-18, open | |
-| I1, I2, I3 | Prokop | waiting for P2.6 (planner) and P1.2/P3.1 (perception, tracker); can start on the fakes | |
+| P2.8 feasibility funnel | Prokop | **removed** 2026-11-24 (duplicated Natka's P2.2–P2.6; in git history) | — |
+| I1 application (diagnostic runner) | Prokop | **first version** 2026-11-22: all phases in order on the contract types, each compared with the simulator's truth; stops at the first failing phase (P3.1 stand-in: `ModelTracker` on the fitted model) | `Prokop/run_solver.py`, output in `Prokop/runs/` |
+| I2, I3 | Prokop | open | |
 
 ## 9. Working with AI on a task
 

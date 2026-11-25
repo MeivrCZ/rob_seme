@@ -89,6 +89,130 @@ queued moves), approach paths (RRT), phase corrections and the executor. A new
 task P2.8 (feasibility funnel: reach check, IK feasibility map, start-phase
 screening before the expensive search) was added to the planning phase.
 
+## Natka: what blocks the planner (P2.2-P2.6), and the hoop side (2026-11-22)
+
+I ran the whole pipeline in the sim (`Prokop/run_solver.py`, see below) and a
+sweep of 8 random placements x both spin directions. Perception works, and
+Prokop's feasibility funnel (P2.8, since removed: see below) found a path in 12
+of the 16. **Your planner found no plan in any of the 16 cases.** Your
+files are untouched; to find out what blocks, I used a copy of them in
+`Prokop/natka_copy/` (changes marked `# PROKOP COPY:`, currently only one
+line). Three things block, in this order:
+
+1. **Hoop side (decided, contract C13).** `hoop_targets.checkpoint_ring_target`
+   puts the hoop's +z along the direction of travel, so *side A* leads (the
+   flat side of the ring facing the robot in `q_home`; the URDF's z axis
+   points out of it). Nothing in the contracts said which side, so this was a
+   gap in the spec, not a mistake. Prokop decided: **only side B leads** (the
+   side facing away from the robot in `q_home`), because with side A the arm
+   ends far too close to the table at the bottom of the path. In all 12
+   placements where the funnel (then searching both sides) found a path, it
+   used side B at every checkpoint; with side A your planner had no IK
+   solution at checkpoint 0. The convention (contracts docstring, C13): ring
+   frame = `checkpoint_T @ Rx(pi) @ Rz(roll)` (handle along the checkpoint's
+   -y at roll 0). Your `hoop_targets` is now the only implementation, and in
+   it that is one line in `checkpoint_ring_target`:
+
+   ```python
+   ring[:3, :3] = checkpoint[:3, :3] @ so3_rx(np.pi) @ so3_rx(tilt) @ so3_rz(roll)
+   ```
+
+   With it, your IK finds the same solutions as the funnel (checked: same
+   flange target to 1e-9).
+
+2. **The traversal starts at `q_home`** (`timed_plan(q_start=None)` falls back
+   to `robot.q_home`). Then the first step is a move of ~100 deg from home
+   straight into the puzzle: it takes ~12 s, the turntable turns ~150 deg
+   meanwhile, and in the next fixed-point iteration checkpoint 0 is out of
+   reach. The contracts mean `q_start` to be the pre-entry configuration
+   (C12, P2.7): the robot gets there first on the approach line and waits for
+   theta_start; checkpoint 0 is already 15 mm outside the bar, so its
+   configuration can be `q_start` (one per start phase: an IK solution of
+   checkpoint 0 at theta_start).
+
+3. **The selection (P2.5) does not keep continuity.** `_compare_scores`
+   compares (worst margin, -transition cost) lexicographically; margins are
+   floats and practically never equal, so the joint cost and the branch-switch
+   penalty never decide anything. Even with `q_start` = the funnel's
+   checkpoint-0 configuration, the selected path starts 220 deg away from it
+   and jumps 160 deg (a wrist flip) at checkpoint 7; in another run 174 deg.
+   Such a jump takes seconds (so the fixed point diverges) and between the two
+   checkpoints the hoop leaves the path. Needed: a hard limit on the joint
+   change between checkpoints (the funnel used 25 deg) and
+   a combined objective (or margin rounded / thresholded first), so that
+   continuity counts. How to weigh margin against continuity is your call.
+
+Smaller things seen on the way:
+
+- `fixed_point_arrivals` returns at the first infeasible iteration; with a
+  diverging first guess (all arrivals 0) that ends the search for that phase.
+- **Speed, the main cause (profiled 2026-11-24):** `hoop_targets._fixed_mount_frames`
+  loads and parses `crs93.urdf` and `hoop.urdf` on every call, twice per
+  `flange_target`: 86 % of the planner's time (1540 s of a 1788 s run). The
+  frames never change, so `@functools.cache` on it gives identical targets
+  (checked: difference 0) about 15x faster (76 -> 5 ms per target).
+- Speed: one `select_roll_branch` call over 25 checkpoints takes ~130 s here
+  (36 rolls x all IK branches x the margin with finite-difference Jacobians);
+  a whole `timed_plan` over 6 start phases took 30-140 s, once 825 s. The
+  turntable keeps spinning meanwhile (the model predicts it, but the 2-minute
+  attempt limit counts). Precomputing all IK solutions per checkpoint x
+  turntable angle x roll once (the funnel did that in ~2 s, vectorized; in
+  git history, `Prokop/solver/ik_batch.py`) could replace the per-call IK.
+- Without a collision checker (`checker=None`) the margin counts only the
+  Jacobian and the joint limits.
+- `PlanStep` has no field for the hoop side; with C13 there is only one side,
+  so none is needed.
+
+How to see it yourself (from the repo root, viewer on http://localhost:8080):
+
+```
+uv run Prokop/run_solver.py --seed 1                    # your planner
+uv run Prokop/run_solver.py --seed 1 --planner copy     # the copy (side B)
+uv run Prokop/run_solver.py --seed 1 --stop-after 2     # perception + planning only
+```
+
+It prints every phase (measurements vs the sim's truth, the plan, the
+approach) and stops at the first failing phase;
+log, camera frames and `summary.json` in `Prokop/runs/<time>/`.
+
+## Everyone: approach paths are straight lines now (2026-11-22)
+
+P2.7 no longer uses RRT: the work area is right below `q_home`, so
+`solver.approach.plan_line(robot, q_from, q_to, checker)` moves the ring centre
+on a straight task-space line (position linear, rotation R0 exp(s log(R0^T R1)),
+separately), one IK solution per 2 cm / 5 deg on one branch, collision-checked;
+it returns the path or the reason it cannot. `RRT` and `plan_approach` are gone.
+
+## Everyone: Prokop's duplicates of Natka's planning code removed (2026-11-24)
+
+We build on Natka's planning code, so Prokop's parallel versions are gone:
+
+- `solver/feasibility.py` (P2.8 funnel) and `solver/ik_batch.py`: the funnel
+  did its own ring targets, IK and start-phase walk, i.e. P2.2-P2.6 again.
+  Still in git history (commit 8bf7cc9).
+- `solver/correction.py`: its `so3_log`, `pose_error`,
+  `jacobian_finite_difference` and `ik_numerical` are gone; corrections (P3.4)
+  use `plan_ik.ik_numerical`.
+- `solver/contracts.py`: `checkpoint_frame`, `example_path()` (the fake path)
+  and `ring_target`/`RING_FLIP` are gone. The puzzle path is
+  `crs_puzzle_d_hoop_path.puzzle_path_contract()` everywhere (tests: the
+  `puzzle_path` fixture), the side-B convention (C13) stays in the docstring
+  and is implemented by `hoop_targets`.
+- `solver/approach.py` (`plan_line`) now takes its IK from
+  `plan_ik.all_solutions` / `select_continuous_branch` and the ring offset from
+  `hoop_targets.hoop_ring_pose_from_flange`.
+
+`import solver` (any `solver.*` module) appends `Natka/` to `sys.path`, so
+`plan_ik`, `hoop_targets`, ... import by their plain names. This means
+**Prokop/solver now depends on these Natka functions; please tell Prokop before
+renaming or changing them**: `plan_ik.ik_numerical`, `all_solutions`,
+`select_continuous_branch`, `so3_log`, `hoop_targets.hoop_ring_pose_from_flange`,
+`crs_puzzle_d_hoop_path.puzzle_path_contract`.
+
+`run_solver.py` hands the planner an even grid of start phases (`--phases`,
+default 6) instead of the funnel's candidates. `Prokop/natka_copy/` stays as
+the side-B experiment until `hoop_targets` has the flip.
+
 ## Everyone: soft collision model for planning (2026-11-25)
 
 Planning code should not use the simulator's exact meshes (`collision.py`):

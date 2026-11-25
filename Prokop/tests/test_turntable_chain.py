@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from solver.contracts import TurntableModel, example_model, example_path
+from solver.contracts import TurntableModel, example_model
 from solver.turntable_chain import (BASE, JOINT, MARKERS, PUZZLE, TurntableChain,
                                     chain_urdf, checkpoint_name)
 
@@ -15,8 +15,8 @@ def random_model(rng) -> TurntableModel:
 
 
 @pytest.fixture(scope="module")
-def path():
-    return example_path()
+def path(puzzle_path):
+    return puzzle_path
 
 
 def test_fk_equals_the_reference(path, rng):

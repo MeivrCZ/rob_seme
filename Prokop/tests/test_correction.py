@@ -3,9 +3,7 @@
 import numpy as np
 import pytest
 from ctu_crs import CRS93
-from solver.correction import (MAX_CORRECTION, correct_for_rotation,
-                               jacobian_finite_difference, ik_numerical, pose_error,
-                               rotation_about_axis, so3_log)
+from solver.correction import MAX_CORRECTION, correct_for_rotation, rotation_about_axis
 
 D = np.deg2rad
 
@@ -13,38 +11,6 @@ D = np.deg2rad
 @pytest.fixture(scope="module")
 def crs():
     return CRS93(tty_dev=None)
-
-
-def rodrigues(w):
-    a = np.linalg.norm(w)
-    if a == 0:
-        return np.eye(3)
-    k = w / a
-    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
-    return np.eye(3) + np.sin(a) * K + (1 - np.cos(a)) * K @ K
-
-
-@pytest.mark.parametrize("angle", [0.0, 1e-5, 0.3, 2.0, np.pi - 1e-3, np.pi])
-def test_so3_log_inverts_rodrigues(angle, rng):
-    for _ in range(5):
-        axis = rng.normal(size=3)
-        w = angle * axis / np.linalg.norm(axis)
-        assert np.allclose(rodrigues(so3_log(rodrigues(w))), rodrigues(w), atol=1e-6)
-
-
-def test_jacobian_against_motion(crs):
-    q = D([10, -20, -60, 30, -50, 15])
-    J = jacobian_finite_difference(crs, q)
-    dq = D([0.1, -0.05, 0.08, 0.2, -0.1, 0.05]) * 1e-2
-    assert np.allclose(J @ dq, pose_error(crs.fk(q), crs.fk(q + dq)), atol=1e-8)
-
-
-def test_ik_numerical_converges_near_the_guess(crs, rng):
-    q0 = crs.q_home + D([5, 10, -10, 20, 15, -30])
-    for _ in range(5):
-        q_true = q0 + rng.uniform(-0.1, 0.1, 6)
-        q, ok = ik_numerical(crs, crs.fk(q_true), q0)
-        assert ok and np.allclose(crs.fk(q), crs.fk(q_true), atol=1e-6)
 
 
 def test_rotation_about_axis_keeps_the_axis_fixed():

@@ -18,8 +18,17 @@ Conventions (as everywhere in Prokop/):
 * Checkpoint frame: origin on the ring centre's path, z along the direction of
   travel, x along the puzzle frame's +y (perpendicular to the path plane),
   y = z cross x. The hoop roll is measured about z from this x.
+* Ring target (decided 2026-11-22, C13): side B of the hoop leads, i.e. the
+  ring-centre frame (`hoop_center` of models/hoop.urdf) at a checkpoint with
+  roll r is checkpoint_T @ Rx(pi) @ Rz(r): the hoop's -z along the direction of
+  travel, side B = the flat side of the ring that faces AWAY from the robot in
+  q_home. Only this side is used: with side A leading the arm ends far too
+  close to the table at the bottom of the path. The targets are built by
+  Natka's hoop_targets (P2.2), which still has side A (NOTIFY 2026-11-22).
+* The puzzle path itself (PuzzlePath of puzzle D) comes from Natka's
+  crs_puzzle_d_hoop_path.puzzle_path_contract (P2.1).
 
-The fakes (example_model, fake_measurements, example_path, example_plan) let
+The fakes (example_model, fake_measurements, example_plan) let
 every part be developed and tested before the parts it depends on exist.
 
 Example:
@@ -421,51 +430,6 @@ def fake_measurements(model: TurntableModel, times: np.ndarray,
             yaw=float(yaw + rng.normal(0.0, sigma_yaw * (3 if one else 1))),
             n_markers=1 if one else 2))
     return out
-
-
-def checkpoint_frame(position: np.ndarray, tangent: np.ndarray) -> np.ndarray:
-    """Builds a checkpoint frame (convention in the module doc).
-
-    Args:
-        position: Ring centre in the puzzle frame [m].
-        tangent: Direction of travel in the puzzle's x-z plane.
-
-    Returns:
-        The 4x4 frame in the puzzle frame.
-    """
-    z = np.asarray(tangent, dtype=float) / np.linalg.norm(tangent)
-    x = np.array([0.0, 1.0, 0.0])
-    x = x - (x @ z) * z
-    x /= np.linalg.norm(x)
-    T = np.eye(4)
-    T[:3, :3] = np.column_stack([x, np.cross(z, x), z])
-    T[:3, 3] = position
-    return T
-
-
-def example_path() -> PuzzlePath:
-    """A simplified puzzle-D-like path: straight in, a quarter bend, straight down.
-
-    Not the real puzzle D (task P2.1 provides that); the shape and the numbers
-    are only plausible, for developing the planner.
-
-    Returns:
-        The path, 15 mm checkpoint spacing on the straight parts.
-    """
-    pts, tans = [], []
-    for x in np.arange(0.100, 0.035, -0.015):  # straight in along -x at z 155 mm
-        pts.append([x, 0.0, 0.155])
-        tans.append([-1.0, 0.0, 0.0])
-    for a in np.linspace(np.pi / 2, np.pi, 7)[1:]:  # R50 bend down
-        pts.append([0.035 + 0.05 * np.cos(a), 0.0, 0.105 + 0.05 * np.sin(a)])
-        tans.append([-np.sin(a), 0.0, np.cos(a)])
-    for z in np.arange(0.090, 0.015, -0.015):  # straight down
-        pts.append([-0.015, 0.0, z])
-        tans.append([0.0, 0.0, -1.0])
-    frames = np.array([checkpoint_frame(np.array(p), np.array(t))
-                       for p, t in zip(pts, tans)])
-    return PuzzlePath(frames=frames, clearance=np.full(len(frames), 0.026),
-                      roll_limits=None, final_index=len(frames) - 1)
 
 
 def example_plan(speed: float = 0.2) -> Plan:

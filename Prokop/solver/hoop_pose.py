@@ -27,7 +27,7 @@ ROLL_STEP = np.deg2rad(15.0)  # rad, hoop roll grid
 # it may tilt in. A tilted ring's opening seen along the wire narrows with
 # cos(tilt); past ~75 deg the 10 mm bar no longer fits (the collision check
 # decides). The two faces stay separate: turning over would cut the bar.
-TILTS = np.deg2rad([0.0, 15.0, 30.0, 45.0, 60.0])
+TILTS = np.deg2rad(np.arange(0.0, 50.0 + 1e-9, 10.0))  # 0, 10, ..., 50 deg
 TILT_DIRECTION_STEP = np.deg2rad(45.0)
 FACES = (-1, 1)  # leading side of the hoop: -1 = side B (C13), +1 = side A
 FACE_NAMES = {-1: "B", 1: "A"}

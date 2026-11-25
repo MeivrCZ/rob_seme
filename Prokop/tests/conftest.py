@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # Prokop/
 
+import solver  # noqa: E402,F401  (puts Natka/ on the import path)
 from ctu_crs import CRS93  # noqa: E402
 
 
@@ -33,3 +34,10 @@ def rng() -> np.random.Generator:
 def task():
     from placement import TaskScene
     return TaskScene()
+
+
+@pytest.fixture(scope="session")
+def puzzle_path():
+    """Puzzle D's checkpoint path (Natka's P2.1, the PuzzlePath contract)."""
+    from crs_puzzle_d_hoop_path import puzzle_path_contract
+    return puzzle_path_contract()

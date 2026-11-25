@@ -13,6 +13,8 @@ Scene parts, each can be shown or hidden in the "Scene" panel:
 * Base + puzzle D: the puzzle seated in the groove of the ArUco base, on its foam
   on the turntable.
 * Turntable: draggable with a gizmo, spinning from the "Turntable" panel.
+* Puzzle checkpoints: the path of Natka's puzzle_path_contract on the puzzle
+  (small frames, blue z = direction of travel; green start to red end).
 * Cage + camera: the static work cell of cell.py.
 * Model gallery: all static models in a row outside the cage (hidden by default).
 
@@ -49,6 +51,7 @@ SPIN_FPS = 30.0  # turntable animation rate
 INITIAL_PLACEMENT = Placement(np.array([0.45, 0.0]), np.zeros(2), 0.0)
 FRAME_AXES = 0.03  # m, length of the link frame axes
 ROBOT_FRAME_AXES = 0.12  # m, longer: robot frames lie inside the link bodies
+CHECKPOINT_AXES = 0.012  # m, length of the puzzle checkpoint axes
 
 
 @dataclass
@@ -207,6 +210,49 @@ def add_task(server: viser.ViserServer, task: TaskScene
     return turntable, Part([base_root], vis, frames), gizmo, top, base_root
 
 
+def add_checkpoints(server: viser.ViserServer) -> Part:
+    """Adds the checkpoints of the puzzle path (Natka's puzzle_path_contract).
+
+    Attached to the puzzle frame, so they turn with the turntable. Each
+    checkpoint is a small frame (blue z = direction of travel), joined by a
+    line from checkpoint 0 (green) to the final one (red); every fifth and the
+    final checkpoint are labelled with their index.
+
+    Args:
+        server: The Viser server.
+
+    Returns:
+        The scene part (empty if the path cannot be loaded).
+    """
+    try:
+        import solver  # noqa: F401  (puts Natka/ on the import path)
+        from crs_puzzle_d_hoop_path import puzzle_path_contract
+        path = puzzle_path_contract()
+    except Exception as error:  # the viewer still works without them
+        print(f"Checkpoints not shown: {error}")
+        return Part()
+    root_name = "/turntable/top/base/puzzle/checkpoints"
+    root = server.scene.add_frame(root_name, show_axes=False)
+    points = np.array([F[:3, 3] for F in path.frames])
+    n = len(points)
+    shade = np.linspace(0.0, 1.0, n)[:, None]
+    colors = ((1 - shade) * np.array([40, 180, 60]) + shade * np.array([220, 40, 40])
+              ).astype(np.uint8)
+    server.scene.add_line_segments(
+        f"{root_name}/path", np.stack([points[:-1], points[1:]], axis=1),
+        np.stack([colors[:-1], colors[1:]], axis=1), thickness=2.0,
+        thickness_units="screen")
+    for i, F in enumerate(path.frames):
+        server.scene.add_frame(
+            f"{root_name}/cp{i}", wxyz=wxyz(F), position=F[:3, 3],
+            axes_length=CHECKPOINT_AXES, axes_radius=CHECKPOINT_AXES / 15,
+            origin_radius=CHECKPOINT_AXES / 6, origin_color=tuple(int(c) for c in colors[i]))
+        if i % 5 == 0 or i == n - 1 or i == path.final_index:
+            server.scene.add_label(f"{root_name}/cp{i}/label", str(i),
+                                   position=(0.0, 0.0, 0.0), font_screen_scale=0.7)
+    return Part([root])
+
+
 def add_cell(server: viser.ViserServer) -> Part:
     """Adds the static work cell of cell.py.
 
@@ -313,6 +359,7 @@ class SceneViewer:
             "Hoop": hoop_part,
             f"Base + {TASK_PUZZLE.replace('_', ' ')}": base_part,
             "Turntable": turntable_part,
+            "Puzzle checkpoints": add_checkpoints(server),
             "Cage + camera": add_cell(server),
             "Model gallery": add_gallery(server),
         }

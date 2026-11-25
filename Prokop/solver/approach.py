@@ -1,26 +1,32 @@
-"""Task P2.7: collision-free approach and retreat paths (lab 6: RRT + random shortcut).
+"""Task P2.7: collision-free approach and retreat paths (straight task-space lines).
 
 Moves between q_home and the plan's pre-entry configuration q_start. The puzzle
 keeps spinning while the robot approaches, so the arm is checked against the
 volume the turntable, base and puzzle sweep in a full turn (from the estimated
-TurntableModel), besides the cell, the table and itself.
+TurntableModel), besides the cell, the table and itself. (RRT was replaced by
+the straight line on 2026-11-22: the work area lies right below q_home.)
 
-The planner follows the semantics of the lab-6 template (robotics_labs
-planning/rrt.py and utils/configuration_utils.py): RRT(robot, delta_q,
-p_sample_goal) with goal-biased sampling, steering by at most delta_q along the
-straight line in joint space, and random_shortcut(path, max_iterations) that
-replaces a part of the path by a straight segment when that is free.
+Straight line in task space (plan_line): the ring centre moves on a straight
+line and its orientation turns at a constant rate about one axis, position and
+rotation interpolated separately (not the SE3 screw motion, whose position
+follows a helix when the rotation changes):
 
-Example:
+    p(s) = p0 + s (p1 - p0),    R(s) = R0 exp(s log(R0^T R1)),    s in [0, 1].
+
+For now s only places the samples (one move_to_q each); it can later carry
+the timing.
+
     ::
 
-        checker = ApproachChecker(model)
-        path = plan_approach(robot, checker, robot.q_home, plan.q_start)  # or None
+        line = plan_line(robot, robot.q_home, plan.q_start, checker)
+        if line.path is None:
+            print(line.reason)
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
+from dataclasses import dataclass
+from functools import cache
 
 import numpy as np
 import trimesh
@@ -28,22 +34,16 @@ from cell import TABLE_Z, cell_meshes
 from collision import SceneCollider, arm_parts
 from placement import Placement, TaskScene
 
+from hoop_targets import hoop_ring_pose_from_flange
+from plan_ik import all_solutions, select_continuous_branch, so3_log
+
 from solver.contracts import TurntableModel
 
 MARGIN = 0.02  # m, required clearance of the arm on the approach
 CHECK_STEP = np.deg2rad(1.0)  # rad, largest joint change between checked configurations
-# RRT sampling boxes around start and goal [rad per joint]; None = all joint limits.
-SAMPLE_MARGINS = (np.deg2rad(30.0), np.deg2rad(60.0), None)
-
-
-def distance_between_configurations(a: np.ndarray, b: np.ndarray) -> float:
-    """Joint-space distance (lab 6 configuration_utils semantics)."""
-    return float(np.linalg.norm(np.asarray(a) - np.asarray(b)))
-
-
-def interpolate(a: np.ndarray, b: np.ndarray, d: float) -> np.ndarray:
-    """Configuration at distance @d from @a towards @b (lab 6 semantics)."""
-    return a + d * (b - a) / distance_between_configurations(a, b)
+LINE_STEP = 0.02  # m, largest ring-centre move between samples of a line
+LINE_ANGLE = np.deg2rad(5.0)  # rad, largest rotation between samples of a line
+LINE_MAX_JUMP = np.deg2rad(20.0)  # rad, largest joint change between samples
 
 
 class ApproachChecker:
@@ -149,135 +149,151 @@ def _bisection_order(n: int) -> list[int]:
     return order
 
 
-class RRT:
-    """RRT in joint space (lab 6 semantics), checked with an ApproachChecker."""
-
-    def __init__(self, robot, checker: ApproachChecker, delta_q: float = 0.2,
-                 p_sample_goal: float = 0.5, rng: np.random.Generator | None = None
-                 ) -> None:
-        """Sets up the planner.
-
-        Args:
-            robot: CRS93 / CRS93Sim (joint limits q_min, q_max).
-            checker: Collision checker.
-            delta_q: Maximum distance between two configurations of the tree [rad].
-            p_sample_goal: Probability of sampling the goal as q_rand.
-            rng: Random generator (default seed 0, for reproducible plans).
-        """
-        self.robot, self.checker = robot, checker
-        self.delta_q, self.p_sample_goal = delta_q, p_sample_goal
-        self.rng = rng or np.random.default_rng(0)
-
-    def plan(self, q_start: np.ndarray, q_goal: np.ndarray,
-             max_iterations: int = 10000, sample_margin: float | None = None
-             ) -> list[np.ndarray]:
-        """RRT from @q_start to @q_goal.
-
-        Args:
-            q_start: Start configuration (free) [rad].
-            q_goal: Goal configuration (free) [rad].
-            max_iterations: Samples before giving up.
-            sample_margin: If given, random samples are drawn from the box
-                spanned by start and goal, widened by this much per joint [rad]
-                (and clipped to the joint limits), instead of the whole joint
-                range: an approach detour is local.
-
-        Returns:
-            The path from start to goal (configurations at most delta_q apart),
-            or an empty list if none was found.
-        """
-        q_start, q_goal = np.asarray(q_start, float), np.asarray(q_goal, float)
-        assert self.checker.is_free(q_start) and self.checker.is_free(q_goal)
-        lo, hi = self.robot.q_min, self.robot.q_max
-        if sample_margin is not None:
-            lo = np.maximum(lo, np.minimum(q_start, q_goal) - sample_margin)
-            hi = np.minimum(hi, np.maximum(q_start, q_goal) + sample_margin)
-        nodes, parents = [q_start], [-1]
-        blocked_to_goal: set[int] = set()  # nodes whose extension to the goal failed
-        for _ in range(max_iterations):
-            to_goal = self.rng.uniform() < self.p_sample_goal
-            q_rand = q_goal if to_goal else self.rng.uniform(lo, hi)
-            i_near = int(np.argmin([distance_between_configurations(n, q_rand)
-                                    for n in nodes]))
-            if to_goal and i_near in blocked_to_goal:
-                continue  # the same extension again would fail again
-            q_near = nodes[i_near]
-            d = distance_between_configurations(q_near, q_rand)
-            if d == 0:
-                continue
-            q_new = q_rand if d <= self.delta_q else interpolate(q_near, q_rand,
-                                                                 self.delta_q)
-            if not self.robot.in_limits(q_new) or not self.checker.segment_free(q_near, q_new):
-                if to_goal:
-                    blocked_to_goal.add(i_near)
-                continue
-            nodes.append(q_new)
-            parents.append(i_near)
-            if (distance_between_configurations(q_new, q_goal) <= self.delta_q
-                    and self.checker.segment_free(q_new, q_goal)):
-                path, i = [q_goal], len(nodes) - 1
-                while i >= 0:
-                    path.append(nodes[i])
-                    i = parents[i]
-                return path[::-1] if np.any(path[-1] != q_goal) else path
-        return []
-
-    def random_shortcut(self, path: list[np.ndarray], max_iterations: int = 100
-                        ) -> list[np.ndarray]:
-        """Random shortcut (lab 6 semantics).
-
-        Picks two configurations on the path at random and replaces the part
-        between them by the straight segment if that is free.
-
-        Args:
-            path: The path.
-            max_iterations: Number of attempts.
-
-        Returns:
-            The shortened path (a copy).
-        """
-        out = deepcopy(path)
-        for _ in range(max_iterations):
-            if len(out) < 3:
-                break
-            i, j = sorted(self.rng.choice(len(out), 2, replace=False))
-            if j - i < 2:
-                continue
-            if self.checker.segment_free(out[i], out[j]):
-                out = out[:i + 1] + out[j:]
-        return out
-
-
-def plan_approach(robot, checker: ApproachChecker, q_from: np.ndarray,
-                  q_to: np.ndarray, max_iterations: int = 5000,
-                  rng: np.random.Generator | None = None) -> list[np.ndarray] | None:
-    """Collision-free joint-space path between two configurations.
-
-    One straight move if it is free; otherwise RRT (sampling near start and goal
-    first, then wider, see SAMPLE_MARGINS) and random shortcut. Each
-    configuration of the result is meant as one move_to_q (the robot stops at
-    the corners).
+def so3_exp(w: np.ndarray) -> np.ndarray:
+    """Rotation matrix of a rotation vector (lab 1 exp map, Rodrigues).
 
     Args:
-        robot: CRS93 / CRS93Sim (joint limits).
-        checker: Collision checker for the current turntable model.
-        q_from: Start configuration [rad].
-        q_to: Goal configuration [rad].
-        max_iterations: RRT samples before giving up.
-        rng: Random generator.
+        w: Rotation vector [rad], shape (3,).
 
     Returns:
-        The configurations from q_from to q_to (both included), or None if the
-        start or goal is not free or no path was found.
+        3x3 rotation matrix.
+    """
+    w = np.asarray(w, dtype=float)
+    angle = np.linalg.norm(w)
+    if angle < 1e-12:
+        return np.eye(3)
+    k = w / angle
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * K @ K
+
+
+def line_poses(T0: np.ndarray, T1: np.ndarray, s: np.ndarray) -> np.ndarray:
+    """Poses on the straight task-space line from @T0 to @T1.
+
+    Position and rotation separately: p(s) = p0 + s (p1 - p0) and
+    R(s) = R0 exp(s log(R0^T R1)).
+
+    Args:
+        T0: Start pose (4x4).
+        T1: End pose (4x4).
+        s: Line parameters in [0, 1], shape (M,).
+
+    Returns:
+        The poses, shape (M, 4, 4); s = 0 gives T0, s = 1 gives T1.
+    """
+    s = np.atleast_1d(np.asarray(s, dtype=float))
+    R0, p0 = T0[:3, :3], T0[:3, 3]
+    w = so3_log(R0.T @ T1[:3, :3])
+    out = np.tile(np.eye(4), (len(s), 1, 1))
+    for k, sk in enumerate(s):
+        out[k, :3, :3] = R0 @ so3_exp(sk * w)
+        out[k, :3, 3] = p0 + sk * (T1[:3, 3] - p0)
+    return out
+
+
+def line_samples(T0: np.ndarray, T1: np.ndarray, max_step: float = LINE_STEP,
+                 max_angle: float = LINE_ANGLE) -> np.ndarray:
+    """Evenly spaced line parameters, fine enough for both limits.
+
+    Args:
+        T0: Start pose (4x4).
+        T1: End pose (4x4).
+        max_step: Largest position change between samples [m].
+        max_angle: Largest rotation between samples [rad].
+
+    Returns:
+        s from 0 to 1 (both included), shape (n + 1,), n >= 1.
+    """
+    dist = np.linalg.norm(T1[:3, 3] - T0[:3, 3])
+    angle = np.linalg.norm(so3_log(T0[:3, :3].T @ T1[:3, :3]))
+    n = max(1, int(np.ceil(max(dist / max_step, angle / max_angle))))
+    return np.linspace(0.0, 1.0, n + 1)
+
+
+@cache
+def ring_in_flange() -> np.ndarray:
+    """Pose of the ring centre in the flange frame (Natka's hoop chain, cached)."""
+    return hoop_ring_pose_from_flange(np.eye(4))
+
+
+@dataclass
+class LinePath:
+    """Result of plan_line.
+
+    Attributes:
+        path: One configuration per sample, from q_from to q_to (both
+            included), or None if the line cannot be followed.
+        s: The line parameters of the samples.
+        reason: Why the line failed ("" if it did not).
+        max_deviation: Largest distance [m] of the tool point from the line at
+            the joint-space midpoints between samples (the robot moves straight
+            in joint space between them).
+    """
+
+    path: list[np.ndarray] | None
+    s: np.ndarray
+    reason: str = ""
+    max_deviation: float = 0.0
+
+
+def plan_line(robot, q_from: np.ndarray, q_to: np.ndarray,
+              checker: ApproachChecker | None = None, s: np.ndarray | None = None,
+              tool: np.ndarray | None = None, max_jump: float = LINE_MAX_JUMP
+              ) -> LinePath:
+    """Joint configurations that move the tool on a straight task-space line.
+
+    The tool frame (by default the ring centre) moves from its pose at @q_from
+    to its pose at @q_to on line_poses. At every sample the IK solution nearest
+    to the previous configuration is taken (Natka's plan_ik: analytical IK incl.
+    the +-2 pi wrist variants, refined numerically near the wrist singularity),
+    so the line stays on one IK branch. It fails if a
+    sample is unreachable, needs a joint jump larger than @max_jump (a branch
+    switch or a singularity), ends on a different branch than @q_to, or (with a
+    checker) a segment between samples is not free.
+
+    Args:
+        robot: CRS93 / CRS93Sim (fk, joint limits, DH parameters).
+        q_from: Start configuration [rad].
+        q_to: End configuration [rad].
+        checker: If given, every joint-space segment between samples is checked.
+        s: Line parameters (increasing, from 0 to 1); default line_samples.
+        tool: Tool frame in the flange frame; default the ring centre.
+        max_jump: Largest accepted change of any joint between samples [rad].
+
+    Returns:
+        The LinePath.
     """
     q_from, q_to = np.asarray(q_from, float), np.asarray(q_to, float)
-    if not (checker.is_free(q_from) and checker.is_free(q_to)):
-        return None
-    if checker.segment_free(q_from, q_to):
-        return [q_from, q_to]
-    rrt = RRT(robot, checker, rng=rng)
-    for margin in SAMPLE_MARGINS:  # local first, wider if that fails
-        path = rrt.plan(q_from, q_to, max_iterations // len(SAMPLE_MARGINS), margin)
-        if path:
-            return rrt.random_shortcut(path, 200)
-    return None
+    tool = ring_in_flange() if tool is None else np.asarray(tool, float)
+    tool_inv = np.linalg.inv(tool)
+    T0, T1 = robot.fk(q_from) @ tool, robot.fk(q_to) @ tool
+    s = line_samples(T0, T1) if s is None else np.asarray(s, float)
+    targets = line_poses(T0, T1, s) @ tool_inv  # flange poses
+    path = [q_from]
+    for k in range(1, len(targets)):
+        q = select_continuous_branch(all_solutions(robot, targets[k], q_previous=path[-1]),
+                                     path[-1])
+        if q is None:
+            return LinePath(None, s, f"no IK solution within the limits at s = {s[k]:.3f}")
+        jump = np.abs(q - path[-1]).max()
+        if jump > max_jump:
+            return LinePath(None, s, f"joint jump of {np.rad2deg(jump):.1f} deg at "
+                            f"s = {s[k]:.3f} (branch switch or singularity)")
+        path.append(q)
+    if np.abs(path[-1] - q_to).max() > 1e-3:
+        return LinePath(None, s, "q_to is on another IK branch than the line from "
+                        "q_from reaches")
+    path[-1] = q_to
+    if checker is not None:
+        for k, (a, b) in enumerate(zip(path, path[1:])):
+            if not checker.segment_free(a, b):
+                what = checker.clearance(a + 0.5 * (b - a))[1]
+                return LinePath(None, s, f"segment {k} (s = {s[k]:.3f} to {s[k + 1]:.3f}) "
+                                f"not free (nearest: {what})")
+    p0, p1 = T0[:3, 3], T1[:3, 3]
+    u = (p1 - p0) / max(np.linalg.norm(p1 - p0), 1e-12)
+    dev = 0.0
+    for a, b in zip(path, path[1:]):
+        p = (robot.fk(a + 0.5 * (b - a)) @ tool)[:3, 3] - p0
+        dev = max(dev, float(np.linalg.norm(p - (p @ u) * u)))
+    return LinePath(path, s, max_deviation=dev)

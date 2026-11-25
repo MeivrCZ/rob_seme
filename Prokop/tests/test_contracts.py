@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from placement import Placement, TaskScene
 from solver.contracts import (OMEGA, ModelTracker, PhaseEstimate, TurntableModel, example_model,
-                              example_path, example_plan, fake_measurements, rot_z)
+                              example_plan, fake_measurements, rot_z)
 
 
 @pytest.fixture(scope="module")
@@ -53,19 +53,8 @@ def test_fake_measurements_noise_and_missing():
     assert all(a.t_capture < b.t_capture for a, b in zip(some, some[1:]))
 
 
-def test_example_path_frames():
-    path = example_path()
-    for T in path.frames:
-        R = T[:3, :3]
-        assert np.allclose(R.T @ R, np.eye(3)) and np.linalg.det(R) == pytest.approx(1)
-        assert np.allclose(R[:, 0], [0, 1, 0])  # x along the puzzle's +y
-    steps = np.linalg.norm(np.diff(path.positions, axis=0), axis=1)
-    assert steps.max() < 0.02
-    assert path.clearance.shape == (len(path.frames),)
-
-
-def test_checkpoint_T_composes(scene):
-    m, path = example_model(), example_path()
+def test_checkpoint_T_composes(scene, puzzle_path):
+    m, path = example_model(), puzzle_path
     T = m.checkpoint_T(path, 3, 0.5)
     assert np.allclose(T, m.puzzle_T(0.5) @ path.frames[3])
 
