@@ -7,6 +7,7 @@ are 4x4 matrices, and composition follows T_world_A @ T_A_B.
 from __future__ import annotations
 
 import sys
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -82,6 +83,7 @@ def checkpoint_ring_target(checkpoint_T: np.ndarray, roll: float = 0.0,
     return ring
 
 
+@cache
 def _fixed_mount_frames() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load flange-adapter, hoop-mount, and hoop-link-ring frames."""
     robot = load_urdf(MODELS / "crs93.urdf")

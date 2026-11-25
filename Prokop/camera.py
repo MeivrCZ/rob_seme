@@ -171,15 +171,15 @@ class SceneRenderer:
                             ("base", task.base), ("puzzle", task.puzzle)):
             self._items += [(group, urdf.scene.graph[n][0], m, c)
                             for n, m, c in _visuals(urdf)]
-        self._gl: dict[int, dict] = {}  # OpenGL state per thread
+        self._gl = threading.local()
 
     def prepare(self) -> None:
         """Makes the OpenGL context of the calling thread, if it has none yet.
 
         render() does it too; call it ahead to keep the first render fast.
         """
-        if threading.get_ident() not in self._gl:
-            self._gl[threading.get_ident()] = self._init_gl()
+        if not hasattr(self._gl, "state"):
+            self._gl.state = self._init_gl()
 
     def _init_gl(self) -> dict:
         """Creates a context with the shaders, meshes and framebuffers.
@@ -253,7 +253,7 @@ class SceneRenderer:
             Image (height, width, 3), BGR uint8, like CRS93.grab_image.
         """
         self.prepare()
-        gl = self._gl[threading.get_ident()]
+        gl = self._gl.state
         if gl["resolution"] != tuple(self.camera.resolution):
             raise ValueError("the camera resolution changed after prepare()")
         groups = self.poses(q, placement, turntable_angle)

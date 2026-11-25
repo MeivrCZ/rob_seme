@@ -128,7 +128,8 @@ def rotation_about_axis(axis_xy: np.ndarray, dtheta: float) -> np.ndarray:
 
 
 def correct_for_rotation(robot, q_planned: np.ndarray, dtheta: float,
-                         axis_xy: np.ndarray) -> tuple[np.ndarray, bool]:
+                         axis_xy: np.ndarray, *, max_rotation: float = MAX_CORRECTION
+                         ) -> tuple[np.ndarray, bool]:
     """Configuration reaching the planned hoop target rotated with the turntable.
 
     Args:
@@ -136,17 +137,18 @@ def correct_for_rotation(robot, q_planned: np.ndarray, dtheta: float,
         q_planned: Planned configuration [rad].
         dtheta: Actual minus planned turntable angle at arrival [rad].
         axis_xy: The turntable axis [m].
+        max_rotation: Maximum permitted phase correction [rad].
 
     Returns:
         The corrected configuration [rad] and whether it is acceptable: IK
-        converged, within the joint limits, |dtheta| <= MAX_CORRECTION and no
+        converged, within the joint limits, |dtheta| <= max_rotation and no
         joint changed by more than MAX_JOINT_CHANGE (a larger change would mean
         another IK branch or a near-singular configuration).
     """
     q_planned = np.asarray(q_planned, dtype=float)
     if dtheta == 0.0:
         return q_planned.copy(), True
-    if abs(dtheta) > MAX_CORRECTION:
+    if abs(dtheta) > max_rotation:
         return q_planned.copy(), False
     T = rotation_about_axis(axis_xy, dtheta) @ robot.fk(q_planned)
     q, ok = ik_numerical(robot, T, q_planned)

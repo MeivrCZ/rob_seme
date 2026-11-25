@@ -309,7 +309,7 @@ class CRS93Sim(CRS93):
         self.status_delay = status_delay
         self.camera_delay = camera_delay
         self.camera = Camera()
-        self._camera_opened: set[int] = set()  # threads that called grab_image
+        self._camera_state = threading.local()
         self._lock = threading.Lock()
         self._running = True  # the threads run until stop()
         self._segments: list[Segment] = []
@@ -511,17 +511,19 @@ class CRS93Sim(CRS93):
         """
         omega = abs(self.viewer._omega)
         reach = np.linalg.norm(self.viewer.placement.base_xy) + TASK_REACH
-        moved, joint = 0.0, 0.0
-        q_prev = self._q_at(t0)
-        q_ref = q_prev
-        t = t0
-        while t < t1:
-            t_next = min(t + MONITOR_SUBSTEP, t1)
-            q = self._q_at(t_next)
-            moved += ARM_REACH * np.abs(q - q_prev).sum() + omega * reach * (t_next - t)
-            joint = max(joint, float(np.abs(q - q_ref).max()))
-            q_prev, t = q, t_next
-        return moved, joint
+        with self._lock:
+            segments = tuple(self._segments)
+            motion_end = min(t1, self._collision.t_free) if self._collision is not None else t1
+        travel = np.zeros(6)
+        for segment in segments:
+            start = max(t0, segment.t0)
+            end = min(motion_end, segment.t_end)
+            if end > start:
+                # Joint coordinates are monotone within one coordinated move.
+                # Sum their exact travel separately across any reversals.
+                travel += np.abs(segment.q_at(end) - segment.q_at(start))
+        moved = ARM_REACH * travel.sum() + omega * reach * (t1 - t0)
+        return float(moved), float(travel.max())
 
     def _next_check(self, t: float, clearance: float, horizon: float) -> float:
         """Next time to check: the arm and the task cannot have moved more than
@@ -691,8 +693,8 @@ class CRS93Sim(CRS93):
         """
         self._guard(motion=False)
         t_call = self._now()
-        first = threading.get_ident() not in self._camera_opened
-        self._camera_opened.add(threading.get_ident())
+        first = not getattr(self._camera_state, "opened", False)
+        self._camera_state.opened = True
         renderer = self._renderer
         renderer.camera = self.camera
         renderer.prepare()  # OpenGL context of this thread, on its first call

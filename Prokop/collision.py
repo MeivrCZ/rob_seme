@@ -312,6 +312,13 @@ class SceneCollider:
         _, pairs = self._arm.in_collision_other(other, return_names=True)
         return sorted(tuple(p) for p in pairs), 0.0
 
+    def in_collision(self, q: np.ndarray, placement: Placement, turntable_angle: float) -> bool:
+        """Check for contact without computing distances to the obstacles."""
+        self._place(q, placement, turntable_angle)
+        return bool(self.placed_self_hits() or self.placed_table()[0]
+                    or self._arm.in_collision_other(self._static)
+                    or self._arm.in_collision_other(self._task_objects))
+
     def check(self, q: np.ndarray, placement: Placement, turntable_angle: float,
               self_collision: bool = True) -> tuple[list[tuple[str, str]], float]:
         """Collisions of the arm in one state of the scene.

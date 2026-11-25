@@ -1,13 +1,32 @@
 """CRS93Sim's hard collision handling: stop, CollisionError, lock, Release."""
 
+from threading import Lock
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from conftest import free_port
 from placement import Placement
-from simulation import CollisionError, CRS93Sim
+from simulation import ARM_REACH, CollisionError, CRS93Sim, Segment
 from test_collision import IN_HOOK_PATH, PLACEMENT
 
 INTO_TABLE = np.deg2rad([0, 90, 60, 0, 0, 0])  # ends deep in the table behind
+
+
+def test_motion_bound_counts_reversals_between_monitor_samples():
+    robot = CRS93Sim.__new__(CRS93Sim)
+    robot._lock = Lock()
+    robot._collision = None
+    robot.viewer = SimpleNamespace(_omega=0.0, placement=PLACEMENT)
+    start = np.zeros(6)
+    target = np.array([0.1, -0.2, 0.0, 0.0, 0.0, 0.0])
+    robot._segments = [Segment(0.0, 0.004, 0.002, start, target),
+                       Segment(0.004, 0.004, 0.002, target, start)]
+
+    distance, joint = robot._motion_bound(0.0, 0.008)
+
+    assert distance == pytest.approx(ARM_REACH * 0.6)
+    assert joint == pytest.approx(0.4)
 
 
 @pytest.fixture

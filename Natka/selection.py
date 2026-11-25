@@ -1,8 +1,8 @@
-"""P2.5: choose hoop roll and IK branches along the Puzzle D checkpoint path.
+"""P2.5: choose hoop roll, tilt and IK branches along the Puzzle D checkpoint path.
 
-This module discretizes roll, obtains all valid IK solutions for each checkpoint,
-and uses dynamic programming (Viterbi) to maximize the worst configuration
-margin while penalizing roll, joint, and IK-branch transitions.
+This module samples tool orientations, obtains valid IK solutions for each
+checkpoint, and uses dynamic programming to maximize the worst configuration
+margin while penalizing orientation, joint, and IK-branch transitions.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ MarginFunction = Callable[[np.ndarray, np.ndarray, int, float, float], float]
 
 @dataclass(frozen=True)
 class SelectionCandidate:
-    """One roll/IK choice at a checkpoint."""
+    """One hoop orientation and joint configuration at a checkpoint."""
 
     index: int
     roll: float
@@ -85,9 +85,9 @@ def branch_key(q: ArrayLike) -> tuple[int, ...]:
     )
 
 
-def circular_roll_distance(a: float, b: float) -> float:
-    """Shortest signed roll difference on [-pi, pi]."""
-    return float(abs((a - b + np.pi) % (2.0 * np.pi) - np.pi))
+def circular_roll_distance(a: float, b: float | np.ndarray) -> float | np.ndarray:
+    """Shortest angular distance between a and each value in b."""
+    return abs((a - b + np.pi) % (2.0 * np.pi) - np.pi)
 
 
 def default_margin(robot, q: np.ndarray, checker=None, placement=None,
@@ -104,14 +104,6 @@ def default_margin(robot, q: np.ndarray, checker=None, placement=None,
     return float(metric.margin)
 
 
-def _compare_scores(first: tuple[float, float],
-                    second: tuple[float, float]) -> bool:
-    """Compare (worst margin, negative transition cost); larger is better."""
-    if first[0] != second[0]:
-        return first[0] > second[0]
-    return first[1] > second[1]
-
-
 def select_roll_branch(
     robot,
     checkpoint_frames: Sequence[np.ndarray],
@@ -126,33 +118,48 @@ def select_roll_branch(
     joint_weight: float = 1.0,
     roll_weight: float = 0.25,
     branch_switch_penalty: float = 2.0,
+    transition_allowed: Callable[[np.ndarray, np.ndarray], bool] | None = None,
+    *,
+    tilt_options: ArrayLike | None = None,
+    tilt_weight: float = 0.25,
+    max_joint_step: float | None = None,
 ) -> SelectionResult:
-    """Select roll and IK branch for every checkpoint using dynamic programming.
+    """Select roll, tilt and IK branch for every checkpoint.
 
     Args:
         robot: CRS93/CRS93Sim interface (ik, fk, in_limits).
         checkpoint_frames: Target poses in the robot frame, shape (N, 4, 4).
         roll_limits: Per-path limits (N, 2), or None for [-pi, pi].
         roll_step: Roll-grid spacing [rad].
-        tilt: Constant tilt around each checkpoint x axis [rad].
+        tilt: Constant tilt around each checkpoint x axis [rad] when there are
+            no tilt_options.
         q_start: Optional first seed configuration for branch continuity.
         margin_function: Optional (q, flange, index, roll, tilt) -> margin.
         checker/placement/turntable_angle: Optional P2.4 collision context.
         joint_weight: Weight of Euclidean joint transition distance.
         roll_weight: Weight of circular roll transition distance [rad].
         branch_switch_penalty: Additive cost for changing the coarse IK branch.
+        transition_allowed: Optional test for the move between consecutive
+            checkpoint configurations. The approach to the first is separate.
+        tilt_options: Optional grid of tilts to try at each checkpoint [rad].
+        tilt_weight: Weight of circular tilt transition distance [rad].
+        max_joint_step: Optional maximum change in one joint between
+            consecutive checkpoints [rad].
 
     Returns:
-        The chosen candidate sequence. ``feasible=False`` means no checkpoint
-        had a joint-limit-valid and FK-valid IK solution.
+        The chosen candidate sequence, or a reason no feasible path was found.
     """
     frames = [np.asarray(frame, dtype=float) for frame in checkpoint_frames]
     if not frames:
         return SelectionResult(False, (), 0.0, "no checkpoints")
     if any(frame.shape != (4, 4) for frame in frames):
         raise ValueError("every checkpoint frame must have shape (4, 4)")
-    if tilt < -np.pi or tilt > np.pi:
-        raise ValueError("tilt must lie between -pi and pi")
+    tilts = np.asarray([tilt] if tilt_options is None else tilt_options, dtype=float)
+    if (tilts.ndim != 1 or tilts.size == 0 or not np.isfinite(tilts).all()
+            or np.any(np.abs(tilts) > np.pi)):
+        raise ValueError("tilts must be a nonempty sequence of finite angles between -pi and pi")
+    if max_joint_step is not None and (not np.isfinite(max_joint_step) or max_joint_step <= 0):
+        raise ValueError("max_joint_step must be positive and finite")
 
     limits = None
     if roll_limits is not None:
@@ -168,85 +175,73 @@ def select_roll_branch(
         if previous_seed.shape != np.asarray(robot.q_min).shape:
             raise ValueError("q_start does not match the robot joint configuration shape")
 
-    states: dict[tuple[int, str], tuple[tuple[float, float], list[SelectionCandidate]]] = {}
+    states: list[tuple[tuple[float, float], list[SelectionCandidate]]] = []
 
     for index, frame in enumerate(frames):
         checkpoint_limits = None if limits is None else limits[index]
         rolls = discretized_rolls(checkpoint_limits, roll_step)
         candidates: list[SelectionCandidate] = []
 
-        for roll in rolls:
-            target = flange_target(frame, roll=float(roll), tilt=float(tilt))
-            solutions = all_solutions(robot, target,
-                                      q_previous=previous_seed)
-            for q in solutions:
-                if margin_function is None:
-                    try:
-                        from .safety_metrics import configuration_metrics
-                    except ImportError:
-                        from safety_metrics import configuration_metrics
-                    metric = configuration_metrics(robot, q, checker=checker,
-                                                   placement=placement,
-                                                   turntable_angle=turntable_angle)
-                    margin = float(metric.margin)
-                else:
-                    margin = float(margin_function(q, target, index,
-                                                   float(roll), float(tilt)))
-                if not np.isfinite(margin):
-                    continue
-                candidate = SelectionCandidate(
-                    index=index,
-                    roll=float(roll),
-                    tilt=float(tilt),
-                    q=np.asarray(q, dtype=float).copy(),
-                    flange_target=target,
-                    margin=margin,
-                    branch_key=branch_key(q),
-                )
-                candidates.append(candidate)
+        for candidate_tilt in tilts:
+            for roll in rolls:
+                target = flange_target(frame, roll=float(roll), tilt=float(candidate_tilt))
+                for q in all_solutions(robot, target, q_previous=previous_seed):
+                    if margin_function is None:
+                        margin = default_margin(robot, q, checker, placement, turntable_angle)
+                    else:
+                        margin = float(margin_function(q, target, index,
+                                                       float(roll), float(candidate_tilt)))
+                    if np.isfinite(margin):
+                        candidates.append(SelectionCandidate(
+                            index=index,
+                            roll=float(roll),
+                            tilt=float(candidate_tilt),
+                            q=np.asarray(q, dtype=float).copy(),
+                            flange_target=target,
+                            margin=margin,
+                            branch_key=branch_key(q),
+                        ))
 
         if not candidates:
             return SelectionResult(False, (), 0.0,
                                    f"no reachable safe IK solution at checkpoint {index}")
 
-        next_states: dict[tuple[int, str], tuple[tuple[float, float], list[SelectionCandidate]]] = {}
+        next_states = []
         if index == 0:
             for candidate in candidates:
-                id_key = (int(round(candidate.roll / roll_step)),
-                          repr(candidate.branch_key))
-                worst = candidate.margin
                 cost = 0.0
                 if previous_seed is not None:
                     joint_cost = float(np.linalg.norm(candidate.q - previous_seed))
                     cost = joint_weight * joint_cost
-                next_states[id_key] = ((worst, -cost), [candidate])
+                next_states.append(((candidate.margin, -cost), [candidate]))
         else:
+            previous = [path[-1] for _, path in states]
+            previous_q = np.array([candidate.q for candidate in previous])
+            previous_rolls = np.array([candidate.roll for candidate in previous])
+            previous_tilts = np.array([candidate.tilt for candidate in previous])
+            previous_branches = np.array([candidate.branch_key for candidate in previous])
+            previous_margins, previous_costs = np.array([score for score, _ in states]).T
             for candidate in candidates:
-                best_score = None
-                best_path = None
-                candidate_key = (int(round(candidate.roll / roll_step)),
-                                 repr(candidate.branch_key))
+                delta = candidate.q - previous_q
+                reachable = np.arange(len(states))
+                if max_joint_step is not None:
+                    reachable = reachable[np.max(np.abs(delta), axis=1) <= max_joint_step]
 
-                for (old_key, (old_score, old_path)) in states.items():
-                    del old_key
-                    previous_candidate = old_path[-1]
-                    joint_cost = float(np.linalg.norm(candidate.q - previous_candidate.q))
-                    roll_cost = circular_roll_distance(candidate.roll,
-                                                       previous_candidate.roll)
-                    branch_cost = (branch_switch_penalty
-                                   if candidate.branch_key != previous_candidate.branch_key
-                                   else 0.0)
-                    transition_cost = (joint_weight * joint_cost
-                                       + roll_weight * roll_cost
-                                       + branch_cost)
-                    new_score = (min(old_score[0], candidate.margin),
-                                 old_score[1] - transition_cost)
-                    if best_score is None or _compare_scores(new_score, best_score):
-                        best_score = new_score
-                        best_path = old_path + [candidate]
-
-                if best_score is not None:
-                    next_states[candidate_key] = (best_score, best_path)
+                transition_costs = (
+                    joint_weight * np.linalg.norm(delta, axis=1)
+                    + roll_weight * circular_roll_distance(candidate.roll, previous_rolls)
+                    + tilt_weight * circular_roll_distance(candidate.tilt, previous_tilts)
+                    + branch_switch_penalty * np.any(previous_branches != candidate.branch_key, axis=1)
+                )
+                margins = np.minimum(previous_margins, candidate.margin)
+                costs = previous_costs - transition_costs
+                ranked = np.lexsort((-costs[reachable], -margins[reachable]))
+                # Test segments in score order, stopping at the first valid one.
+                for predecessor in reachable[ranked]:
+                    if transition_allowed is None or transition_allowed(previous_q[predecessor], candidate.q):
+                        score = (margins[predecessor], costs[predecessor])
+                        next_states.append((score, states[predecessor][1] + [candidate]))
+                        break
 
         if not next_states:
             return SelectionResult(False, (), 0.0,
@@ -254,16 +249,7 @@ def select_roll_branch(
         states = next_states
         previous_seed = None
 
-    best_score = None
-    best_path = None
-    for score, path in states.values():
-        if best_score is None or _compare_scores(score, best_score):
-            best_score = score
-            best_path = path
-
-    if best_path is None:
-        return SelectionResult(False, (), 0.0, "dynamic program had no result")
-
+    best_score, best_path = max(states, key=lambda state: state[0])
     return SelectionResult(True, tuple(best_path), float(best_score[0]), "")
 
 

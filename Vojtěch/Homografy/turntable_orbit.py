@@ -24,6 +24,7 @@ class OrbitFit:
     model: TurntableModel
     xy_rmse_m: float
     yaw_rmse_rad: float
+    omega_sd_rad_s: float
 
     @property
     def radius_m(self) -> float:
@@ -154,8 +155,12 @@ def fit_orbit(measurements: Sequence[BaseMeasurement]) -> OrbitFit:
     )
     xy_error = np.abs(positions - design @ [axis, offset])
     yaw_error = np.angle(np.exp(1j * (yaw - (yaw_ref + omega * dt))))
+    centered_time = dt - np.average(dt, weights=weights)
+    yaw_variance = float(weights @ yaw_error**2 / max(1.0, weights.sum() - 2.0))
+    # Keep a rate uncertainty floor even with near-perfect simulated images.
+    omega_sd = max(np.deg2rad(0.2), np.sqrt(yaw_variance / (weights @ centered_time**2)))
     return OrbitFit(model, float(np.sqrt(np.mean(xy_error ** 2))),
-                    float(np.sqrt(np.mean(yaw_error ** 2))))
+                    float(np.sqrt(np.mean(yaw_error ** 2))), float(omega_sd))
 
 
 def draw_orbit(image: np.ndarray, fit: OrbitFit, measurements: Sequence[BaseMeasurement],

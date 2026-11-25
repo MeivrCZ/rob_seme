@@ -13,8 +13,9 @@ with pytest.MonkeyPatch.context() as imports:
     # rob_crs93_v4 has its own module with the same top-level name.
     imports.delitem(sys.modules, "homography", raising=False)
     try:
-        from advanced_aruco import AdvancedArucoFinder, TimedFrame
-        from aruco_block_detector import ArucoBlockDetector
+        from advanced_aruco import AdvancedArucoFinder, ArucoResult, TimedFrame
+        from aruco_block_detector import ArucoBlockDetector, BlockPose
+        from camera_phase_tracker import CameraPhaseTracker
         from homography import Homography
         from solver.contracts import BaseMeasurement, TurntableModel
     finally:
@@ -116,3 +117,49 @@ def test_orbit_seed_is_preserved_when_older_frames_arrive(homography):
     assert estimated.t_last_valid == seed.t_capture
     assert estimated.xy == pytest.approx([0.18, 0.15])
     assert estimated.yaw == pytest.approx(np.deg2rad(-100))
+
+
+def phase_observation(turntable, capture_time, *, measured_at=None):
+    measurement_time = capture_time if measured_at is None else measured_at
+    theta = turntable.theta_at(measurement_time)
+    offset = complex(*turntable.base_offset) * np.exp(1j * theta)
+    xy = turntable.axis_xy + [offset.real, offset.imag]
+    yaw = float(np.angle(np.exp(1j * (theta + turntable.base_yaw))))
+    pose = BlockPose((0, 0), 0.0, (1, 2), {})
+    return ArucoResult(capture_time, xy, yaw, pose, capture_time)
+
+
+@pytest.mark.parametrize("direction", (1, -1))
+def test_camera_phase_tracker_ignores_fallback_and_outlier(homography, direction):
+    turntable = model(direction)
+    turntable.omega = np.deg2rad(12.0)
+    turntable.theta_ref = np.deg2rad(179 * direction) - turntable.base_yaw
+    finder = AdvancedArucoFinder(ArucoBlockDetector(), homography, turntable)
+    tracker = CameraPhaseTracker(finder, lambda: frame(0.0).image, camera_delay=0.11)
+
+    for timestamp in (2.0, 2.2, 2.5):
+        tracker._observe(phase_observation(turntable, timestamp))
+    estimate = tracker.estimate()
+    assert estimate.t == 2.5
+    assert estimate.theta == pytest.approx(turntable.theta_at(estimate.t))
+
+    observed = phase_observation(turntable, 2.7)
+    tracker._observe(ArucoResult(2.7, observed.xy, observed.yaw, None, 2.5))
+    tracker._observe(ArucoResult(2.7, observed.xy + 0.1, observed.yaw, observed.pose, 2.7))
+    assert tracker.estimate().t == 2.5
+    assert estimate.predict(3.1)[1] > estimate.predict(2.7)[1]
+
+    tracker._observe(phase_observation(turntable, 3.1))
+    assert tracker.estimate().t == 3.1
+    assert tracker.estimate().predict(3.5)[0] == pytest.approx(turntable.theta_at(3.5))
+
+
+def test_camera_phase_tracker_checks_that_turntable_moves(homography):
+    turntable = model(1)
+    turntable.omega = np.deg2rad(12.0)
+    finder = AdvancedArucoFinder(ArucoBlockDetector(), homography, turntable)
+    tracker = CameraPhaseTracker(finder, lambda: frame(0.0).image, camera_delay=0.11)
+
+    for timestamp in (2.0, 2.2, 2.4, 2.6, 2.8):
+        tracker._observe(phase_observation(turntable, timestamp, measured_at=2.0))
+    assert not tracker.wait_ready(timeout=0)

@@ -386,6 +386,11 @@ class SceneViewer:
         with self._spin_lock:
             return self._angle_ref + self._omega * (t - self._t_ref)
 
+    @property
+    def turntable_spinning(self) -> bool:
+        with self._spin_lock:
+            return self._omega != 0.0
+
     def set_spin(self, omega: float, t: float | None = None) -> None:
         """Spins the turntable from now (or from time @t) on.
 

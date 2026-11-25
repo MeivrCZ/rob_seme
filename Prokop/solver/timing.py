@@ -31,6 +31,7 @@ import numpy as np
 COMMAND_DELAY = 0.12  # s, move_to_q call -> the joints start moving
 SEND_DELAY = 0.025  # s, move_to_q blocks (serial write)
 BLEND_TOL = 1e-3  # unit joint-space directions closer than this blend
+STOPPED_STEP_LEAD = 0.20  # s at rest to check and prepare the next command
 
 
 def same_direction(a: np.ndarray, b: np.ndarray) -> bool:
@@ -58,6 +59,7 @@ class TimedMove:
         tau: Speed-up (and slow-down) ramp [s].
         q_from: Start configuration [rad].
         q_to: End configuration [rad].
+        hold_from: Start of a preceding hold to include in collision validation [s].
     """
 
     t0: float
@@ -65,6 +67,7 @@ class TimedMove:
     tau: float
     q_from: np.ndarray
     q_to: np.ndarray
+    hold_from: float | None = None
 
     @property
     def t_end(self) -> float:
@@ -174,6 +177,24 @@ class RobotTiming:
         in time.
         """
         return same_direction(np.asarray(dq_prev, float), np.asarray(dq_next, float))
+
+    def stopped_move(self, q_from: np.ndarray, q_to: np.ndarray, t_call: float) -> TimedMove:
+        """Profile for a command sent while the robot is at rest."""
+        q_from, q_to = np.asarray(q_from, float), np.asarray(q_to, float)
+        duration, ramp = self.profile(q_to - q_from)
+        return TimedMove(t_call + self.command_delay, duration, ramp, q_from, q_to)
+
+    def schedule_stopped(self, q_start: np.ndarray, targets: list[np.ndarray],
+                         t_call: float = 0.0) -> tuple[list[float], list[TimedMove]]:
+        """Time moves sent after the previous move stops and a check interval passes."""
+        moves = []
+        q_from = q_start
+        for q in targets:
+            move = self.stopped_move(q_from, q, t_call)
+            moves.append(move)
+            t_call = max(move.t_end, t_call + self.send_delay) + STOPPED_STEP_LEAD
+            q_from = q
+        return [move.t_end for move in moves], moves
 
     def schedule(self, q_start: np.ndarray, targets: list[np.ndarray],
                  t_call: float = 0.0, call_times: list[float] | None = None

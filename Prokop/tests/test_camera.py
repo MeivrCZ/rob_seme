@@ -2,6 +2,7 @@
 in the image), and has the format of the real camera."""
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -44,6 +45,14 @@ def test_deterministic(renderer, robot):
     a = renderer.render(robot.q_home, IN_VIEW, 0.3)
     b = renderer.render(robot.q_home, IN_VIEW, 0.3)
     assert np.array_equal(a, b)
+
+
+def test_renderer_can_restart_camera_worker(renderer, robot):
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(renderer.render, robot.q_home, IN_VIEW, 0.3).result()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        second = pool.submit(renderer.render, robot.q_home, IN_VIEW, 0.3).result()
+    assert np.array_equal(first, second)
 
 
 def test_empty_table_colour(renderer, robot):

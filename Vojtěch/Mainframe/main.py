@@ -6,9 +6,11 @@ import argparse
 import json
 import sys
 import time
-from dataclasses import dataclass
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
 
 import cv2
 import numpy as np
@@ -16,20 +18,27 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parents[1]
 CAPTURES = ROOT / "captures"
+MAX_HOOP_HEIGHT_M = 0.04
 
-for directory in (REPO / "Prokop", ROOT.parent / "ArucoFinder", ROOT.parent / "Homografy"):
+for directory in (REPO, REPO / "Prokop", ROOT.parent / "ArucoFinder", ROOT.parent / "Homografy"):
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))
 
 from advanced_aruco import AdvancedArucoFinder, TimedFrame  # noqa: E402
 from aruco_block_detector import ArucoBlockDetector  # noqa: E402
+from camera_phase_tracker import CameraPhaseTracker  # noqa: E402
 from cell import TABLE_Z, WORK_AREA_XY  # noqa: E402
 from homography import Homography  # noqa: E402
-from placement import HOOP_MOUNT, MODELS, load_urdf  # noqa: E402
+from Natka.crs_puzzle_d_hoop_path import ARC_SEGMENTS, puzzle_path_contract  # noqa: E402
+from Natka.hoop_targets import hoop_ring_pose_from_flange  # noqa: E402
+from placement import HOOP_MOUNT, MODELS, Placement, load_urdf  # noqa: E402
 from simulation import CRS93Sim  # noqa: E402
 from solver.contracts import BaseMeasurement, TurntableModel  # noqa: E402
+from solver.executor import Executor  # noqa: E402
+from solver.puzzle_plan import PuzzleCollisionChecker, plan_puzzle, plan_withdrawal  # noqa: E402
+from solver.timing import RobotTiming  # noqa: E402
 from turntable_orbit import (  # noqa: E402
-    MARKER_HEIGHT_ABOVE_TABLE_M, capture_series, draw_orbit, fit_orbit, measure_base,
+    MARKER_HEIGHT_ABOVE_TABLE_M, OrbitFit, capture_series, draw_orbit, fit_orbit, measure_base,
 )
 
 
@@ -45,6 +54,9 @@ HELP = """Příkazy
   homo status                        zobrazí aktivní matici a zdroj kalibrace
   homo orbit [N [INTERVAL_S]]         odhadne dráhu držáku (výchozí 10 snímků po 1 s)
   homo predict [SEKUND]               předpoví polohu držáku, výchozí je teď
+  puzzle place X Y YAW_DEG          umístí vystředěnou základnu (XY v metrech)
+  puzzle static [RYCHLOST | demo]    naplánuje a projede D na stojící točně
+  puzzle spin [RYCHLOST | demo]      změří rotaci, naplánuje a projede D za pohybu
   help                               zobrazí příkazy
   quit                               ukončí simulaci
 """
@@ -181,7 +193,7 @@ def detect_markers(robot: CRS93Sim, finder: AdvancedArucoFinder) -> None:
 
 
 def measure_turntable(robot: CRS93Sim, detector: ArucoBlockDetector, homography: Homography,
-                      count: int, interval_s: float) -> tuple[TurntableModel, BaseMeasurement]:
+                      count: int, interval_s: float) -> tuple[OrbitFit, BaseMeasurement]:
     directory = CAPTURES / f"orbit_{capture_stamp()}"
     marker_z = homography.table_z_m + MARKER_HEIGHT_ABOVE_TABLE_M
     measurements = []
@@ -214,7 +226,7 @@ def measure_turntable(robot: CRS93Sim, detector: ArucoBlockDetector, homography:
             "theta_ref": model.theta_ref, "t_ref": model.t_ref,
         },
         "radius_m": fit.radius_m, "signed_omega_rad_s": fit.signed_omega, "period_s": fit.period_s,
-        "xy_rmse_m": fit.xy_rmse_m, "yaw_rmse_rad": fit.yaw_rmse_rad,
+        "xy_rmse_m": fit.xy_rmse_m, "yaw_rmse_rad": fit.yaw_rmse_rad, "omega_sd_rad_s": fit.omega_sd_rad_s,
         "marker_z_m": marker_z, "camera_delay_s": robot.camera_delay, "frames": frames,
     }
     path = directory / "orbit.json"
@@ -222,7 +234,158 @@ def measure_turntable(robot: CRS93Sim, detector: ArucoBlockDetector, homography:
     print(f"Osa XY {model.axis_xy.round(4)} m | poloměr {1000 * fit.radius_m:.1f} mm | "
           f"rychlost {np.rad2deg(fit.signed_omega):+.2f}°/s | perioda {fit.period_s:.2f} s")
     print(f"RMSE polohy {1000 * fit.xy_rmse_m:.2f} mm | model {path}")
-    return model, measurements[-1]
+    return fit, measurements[-1]
+
+
+def run_puzzle(robot: CRS93Sim, calibration: CameraCalibration, *, spinning: bool,
+               speed: float, demo: bool = False) -> None:
+    if not 0.0 < speed <= 1.0:
+        raise ValueError("Relativní rychlost robota musí být v rozsahu (0, 1].")
+    viewer = robot.viewer
+    if viewer.turntable_spinning != spinning:
+        action = "zapni" if spinning else "vypni"
+        raise RuntimeError(f"Před průjezdem {action} Spin v panelu Turntable.")
+    if demo:
+        robot.wait_for_motion_stop()
+        if not np.allclose(robot.get_q(), robot.q_home, atol=1e-4, rtol=0):
+            raise RuntimeError("Pro ukázkovou polohu začni v q_home.")
+        viewer.set_placement(Placement(np.array([0.55, 0.0]), np.zeros(2), np.pi / 2))
+
+    scene_changed = Event()
+    mark_changed = scene_changed.set
+    viewer.on_change.append(mark_changed)
+    try:
+        robot.wait_for_motion_stop()
+        start_q = robot.get_q()
+        finder = calibration.aruco
+        measurement_started = time.monotonic()
+        if spinning:
+            fit, sample = measure_turntable(robot, finder.detector, finder.homography, 10, 1.0)
+            model = fit.model
+        else:
+            image = robot.grab_image()
+            timestamp = time.monotonic() - robot.camera_delay
+            marker_z = finder.homography.table_z_m + MARKER_HEIGHT_ABOVE_TABLE_M
+            sample = measure_base(image, timestamp, finder.detector, finder.homography, marker_z)
+            if sample is None:
+                raise RuntimeError("Kamera nevidí značky základny (ID 1 a 2).")
+            # The simulated fixture supplies the fixed axis. The base XY and yaw
+            # both come from the image, including a base mounted off centre.
+            axis = viewer.placement.turntable_xy.copy()
+            model = TurntableModel(axis, sample.xy - axis, sample.yaw, 1, omega=0.0,
+                                   t_ref=sample.t_capture)
+
+        if scene_changed.is_set():
+            raise RuntimeError("Scéna se během měření změnila. Spusť průjezd znovu.")
+        active_finder = AdvancedArucoFinder(
+            finder.detector, finder.homography, model, last_measurement=sample,
+        )
+        calibration.aruco = active_finder if spinning else AdvancedArucoFinder(finder.detector, finder.homography)
+        measurement_s = time.monotonic() - measurement_started
+
+        planning_started = time.monotonic()
+        path = puzzle_path_contract()
+        marker_z = finder.homography.table_z_m + MARKER_HEIGHT_ABOVE_TABLE_M
+        depth_step = path.final_index
+        if spinning:
+            # Finish on the final straight stem once the requested height is
+            # reached. The extra points farther down the stem are useful in
+            # the stationary demonstration.
+            world_frames = model.puzzle_T(model.theta_ref) @ path.frames[:path.final_index + 1]
+            heights = world_frames[:, 2, 3] - marker_z
+            stem = np.all(np.isclose(path.positions[:, :2], path.positions[path.final_index, :2]), axis=1)
+            goals = np.flatnonzero(stem[:len(heights)] & (heights > 0.0) & (heights < MAX_HOOP_HEIGHT_M))
+            depth = int(goals[0]) if goals.size else path.final_index
+            # Retain the entry, both tangencies and the lower bend. Fewer
+            # stops on the smooth arc leave more time to clear the turning
+            # puzzle. The full spaces between targets are collision-checked.
+            inward = [i for i in range(depth + 1) if not 2 < i < 2 + ARC_SEGMENTS or i % 2 == 0]
+            depth_step = len(inward) - 1
+            indices = inward + inward[-2::-1]
+            path = replace(path, frames=path.frames[indices], clearance=path.clearance[indices],
+                           roll_limits=path.roll_limits[indices] if path.roll_limits is not None else None,
+                           final_index=len(indices) - 1)
+        # This base yaw worked for the centred demo at 28 s/rev. Recompute
+        # and recheck the entire route from the current camera measurements.
+        preferred_phase = None
+        if demo and spinning and model.direction == 1 and np.isclose(fit.period_s, 28.0, atol=0.3):
+            preferred_phase = np.deg2rad(202.5) - model.base_yaw
+        plan = plan_puzzle(robot, model, path, speed, preferred_phase=preferred_phase,
+                           return_to_waiting=spinning)
+        planning_s = time.monotonic() - planning_started
+        print(f"Měření {measurement_s:.1f} s | plánování {planning_s:.1f} s.")
+        if not plan.feasible:
+            raise RuntimeError(f"Průjezd D není dosažitelný ({plan.reason}).")
+        if scene_changed.is_set() or not np.allclose(robot.get_q(), start_q, atol=1e-4, rtol=0):
+            raise RuntimeError("Poloha robota nebo scéna se změnila. Spusť průjezd znovu.")
+        print(f"Plán má {len(plan.steps)} bodů | startovní fáze {np.rad2deg(plan.theta_start):.1f}° "
+              f"| nejmenší odstup {1000 * plan.min_margin:.2f} mm.")
+        waiting_xyz = hoop_ring_pose_from_flange(robot.fk(plan.q_start))[:3, 3]
+        print(f"Čekací poloha středu obruče XYZ {waiting_xyz.round(3)} m.")
+
+        timing = RobotTiming(robot, plan.speed)
+        checker = PuzzleCollisionChecker(model, command_delay=timing.command_delay)
+
+        tracker_context = (CameraPhaseTracker(active_finder, robot.grab_image, robot.camera_delay,
+                                              speed_sd=fit.omega_sd_rad_s)
+                           if spinning else nullcontext(None))
+        execution_started = time.monotonic()
+        result = None
+        with tracker_context as tracker:
+            if tracker is not None and not tracker.wait_ready(timeout=4.0):
+                raise RuntimeError("Kamera nepotvrdila fázi točny. Robot zůstává v klidu.")
+            if scene_changed.is_set():
+                raise RuntimeError("Scéna se před nájezdem změnila. Spusť průjezd znovu.")
+            try:
+                result = Executor(robot, model, plan, tracker, timing, validate_move=checker.validate_move,
+                                  scene_changed=scene_changed.is_set).run()
+            finally:
+                if spinning and (result is None or not result.success):
+                    # An interrupted move can leave the hoop threaded. On
+                    # success the plan leaves it in the cleared waiting pose.
+                    viewer.stop_spin()
+                    calibration.aruco = AdvancedArucoFinder(finder.detector, finder.homography)
+
+        height = None
+        withdrawal = None
+        if len(result.steps) > depth_step and result.steps[depth_step].t_stopped is not None:
+            reached = result.steps[depth_step].q if spinning else robot.get_q()
+            z = hoop_ring_pose_from_flange(robot.fk(reached))[2, 3]
+            height = float(z - marker_z)
+        if result.success:
+            if height is None or not 0.0 < height < MAX_HOOP_HEIGHT_M:
+                result.success = False
+                result.reason = "obruč nedosáhla požadované výšky pod 40 mm nad základnou"
+            elif not spinning:
+                print(f"Obruč dosáhla {1000 * height:.1f} mm nad základnou. Plánuji výjezd.")
+                if not scene_changed.is_set():
+                    exit_plan = plan_withdrawal(robot, model, path, speed, [step.q for step in result.steps])
+                    withdrawal = Executor(robot, model, exit_plan, None, timing,
+                                          validate_move=checker.validate_move,
+                                          scene_changed=scene_changed.is_set).run()
+                    if not withdrawal.success:
+                        result.success = False
+                        result.reason = f"výjezd nedokončen ({withdrawal.reason})"
+                else:
+                    result.success = False
+                    result.reason = "scéna se před výjezdem změnila"
+
+        log_path = CAPTURES / f"puzzle_{capture_stamp()}.json"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            **asdict(result), "hoop_height_m": height,
+            "depth_step": depth_step,
+            "measurement_s": measurement_s, "planning_s": planning_s,
+            "before_first_step_s": (result.t_start - execution_started if result.t_start is not None else None),
+            "withdrawal": asdict(withdrawal) if withdrawal is not None else None,
+        }
+        log_path.write_text(json.dumps(report, default=lambda array: array.tolist(), indent=2), encoding="utf-8")
+        print(f"Záznam průjezdu uložen do {log_path}")
+        if not result.success:
+            raise RuntimeError(f"Průjezd D přerušen ({result.reason}).")
+        print(f"Průjezd D dokončen včetně výjezdu. U základny byl střed obruče ve výšce {1000 * height:.1f} mm.")
+    finally:
+        viewer.on_change.remove(mark_changed)
 
 
 def dispatch(robot: CRS93Sim, calibration: CameraCalibration, words: list[str]) -> bool:
@@ -268,7 +431,18 @@ def dispatch(robot: CRS93Sim, calibration: CameraCalibration, words: list[str]) 
         case ["aruco", "detect"]:
             detect_markers(robot, finder)
         case ["homo", "run"]:
-            homography, path = calibrate_from_hoop(robot)
+            viewer = robot.viewer
+            if viewer.turntable_spinning:
+                raise RuntimeError("Před kalibrací vypni Spin v panelu Turntable.")
+            robot.wait_for_motion_stop()
+            placement = viewer.placement
+            # Park the fixture behind the robot while the hoop calibrates the
+            # front work area. Restore the selected placement in this session.
+            viewer.set_placement(Placement(np.array([-0.55, 0.0]), np.zeros(2), 0.0))
+            try:
+                homography, path = calibrate_from_hoop(robot)
+            finally:
+                viewer.set_placement(placement)
             calibration.aruco = AdvancedArucoFinder(finder.detector, homography)
             calibration.path = path
         case ["homo", "status"]:
@@ -277,9 +451,9 @@ def dispatch(robot: CRS93Sim, calibration: CameraCalibration, words: list[str]) 
         case ["homo", "orbit", *options] if len(options) <= 2:
             count = int(options[0]) if options else 10
             interval = float(options[1]) if len(options) == 2 else 1.0
-            model, last_sample = measure_turntable(robot, finder.detector, finder.homography, count, interval)
+            fit, last_sample = measure_turntable(robot, finder.detector, finder.homography, count, interval)
             calibration.aruco = AdvancedArucoFinder(
-                finder.detector, finder.homography, model, last_measurement=last_sample,
+                finder.detector, finder.homography, fit.model, last_measurement=last_sample,
             )
         case ["homo", "predict", *options] if len(options) <= 1:
             if finder.turntable is None:
@@ -289,6 +463,26 @@ def dispatch(robot: CRS93Sim, calibration: CameraCalibration, words: list[str]) 
                 raise ValueError("Čas předpovědi musí být konečný.")
             xy, yaw = finder.turntable.measurement_at(time.monotonic() + seconds)
             print(f"Předpověď pro t {seconds:+g} s | střed XY {xy.round(4)} m | natočení {np.rad2deg(yaw):+.2f}°")
+        case ["puzzle", "place", x, y, yaw]:
+            xy = np.array([float(x), float(y)])
+            angle = float(yaw)
+            if not np.isfinite([*xy, angle]).all() or not np.all(
+                (WORK_AREA_XY[:, 0] <= xy) & (xy <= WORK_AREA_XY[:, 1])
+            ):
+                raise ValueError("XY musí ležet v pracovním poli kamery a úhel musí být konečný.")
+            viewer = robot.viewer
+            if viewer.turntable_spinning:
+                raise RuntimeError("Před přemístěním vypni Spin v panelu Turntable.")
+            robot.wait_for_motion_stop()
+            base_yaw = np.deg2rad(angle) - viewer.turntable_angle(viewer.clock())
+            viewer.set_placement(Placement(xy, np.zeros(2), base_yaw))
+            calibration.aruco = AdvancedArucoFinder(finder.detector, finder.homography)
+            print(f"Základna XY {xy.round(4)} m | natočení {angle:g}°.")
+        case ["puzzle", ("static" | "spin") as mode, *options] if len(options) <= 1:
+            spinning = mode == "spin"
+            demo = options == ["demo"]
+            speed = float(options[0]) if options and not demo else (0.8 if spinning else 0.4)
+            run_puzzle(robot, calibration, spinning=spinning, speed=speed, demo=demo)
         case _:
             print("Neznámý nebo neúplný příkaz. Zadej help.")
     return True
@@ -302,7 +496,7 @@ def main() -> None:
         parser.error("--port musí být v rozsahu 1 až 65535")
 
     # Viser, animace a čas simulace běží ve vláknech Prokopova simulátoru.
-    robot = CRS93Sim(port=args.port, collisions=False, keep_alive=False)
+    robot = CRS93Sim(port=args.port, collisions=True, keep_alive=False)
     try:
         robot.initialize(home=False)
         finder = AdvancedArucoFinder(ArucoBlockDetector(), simulated_homography(robot))

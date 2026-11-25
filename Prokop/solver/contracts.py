@@ -336,6 +336,8 @@ class PlanStep:
             theta_start + direction * OMEGA * t_rel.
         margin: Worst safety margin on the way to this checkpoint
             (dimensionless, > 0 safe; definition in P2.4).
+        track_phase: Whether the target turns with the puzzle. The last move
+            back to an independently checked waiting configuration is fixed.
     """
 
     index: int
@@ -343,6 +345,7 @@ class PlanStep:
     roll: float
     t_rel: float
     margin: float
+    track_phase: bool = True
 
 
 @dataclass
