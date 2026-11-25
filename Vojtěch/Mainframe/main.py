@@ -21,14 +21,15 @@ for directory in (REPO / "Prokop", ROOT.parent / "ArucoFinder", ROOT.parent / "H
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))
 
+from advanced_aruco import AdvancedArucoFinder, TimedFrame  # noqa: E402
 from aruco_block_detector import ArucoBlockDetector  # noqa: E402
 from cell import TABLE_Z, WORK_AREA_XY  # noqa: E402
 from homography import Homography  # noqa: E402
 from placement import HOOP_MOUNT, MODELS, load_urdf  # noqa: E402
 from simulation import CRS93Sim  # noqa: E402
-from solver.contracts import TurntableModel  # noqa: E402
+from solver.contracts import BaseMeasurement, TurntableModel  # noqa: E402
 from turntable_orbit import (  # noqa: E402
-    MARKER_HEIGHT_ABOVE_TABLE_M, capture_series, draw_orbit, fit_orbit, measure_base, measure_base_pose,
+    MARKER_HEIGHT_ABOVE_TABLE_M, capture_series, draw_orbit, fit_orbit, measure_base,
 )
 
 
@@ -39,7 +40,7 @@ HELP = """Příkazy
   robot wait                         počká na dokončení pohybu
   robot soft-home                    vrátí robot do q_home
   camera snap                        pořídí a uloží snímek PNG
-  aruco detect                       vyfotí scénu, najde značky a uloží výsledek
+  aruco detect                       změří polohu držáku nebo ji odhadne při zakrytí značek
   homo run                           projede polohy obruče a spočítá matici 3×4
   homo status                        zobrazí aktivní matici a zdroj kalibrace
   homo orbit [N [INTERVAL_S]]         odhadne dráhu držáku (výchozí 10 snímků po 1 s)
@@ -51,9 +52,8 @@ HELP = """Příkazy
 
 @dataclass
 class CameraCalibration:
-    model: Homography
+    aruco: AdvancedArucoFinder
     path: Path | None = None
-    turntable: TurntableModel | None = None
 
 
 def capture_stamp() -> str:
@@ -157,29 +157,31 @@ def calibrate_from_hoop(robot: CRS93Sim) -> tuple[Homography, Path]:
     return model, path
 
 
-def detect_markers(robot: CRS93Sim, detector: ArucoBlockDetector,
-                   homography: Homography) -> None:
+def detect_markers(robot: CRS93Sim, finder: AdvancedArucoFinder) -> None:
     image, raw_path, t_capture = capture(robot)
-    pose = detector.detect(image)
+    result = finder.advAruco(TimedFrame(image, t_capture))
+    pose = result.pose if result is not None else None
     annotated_path = raw_path.with_name(f"{raw_path.stem}_aruco.png")
-    save_png(annotated_path, detector.draw(image, pose))
+    save_png(annotated_path, finder.detector.draw(image, pose))
     print(f"Vyznačený snímek uložen do {annotated_path}")
-    if pose is None:
+    if result is None:
         print("Na snímku nebyly nalezeny značky základny (ID 1 a 2).")
         return
 
-    marker_z = homography.table_z_m + MARKER_HEIGHT_ABOVE_TABLE_M
-    sample = measure_base_pose(pose, t_capture, homography, marker_z)
-    marker_ids = ", ".join(str(marker_id) for marker_id in pose.visible_ids)
-    print(f"ArUco ID {marker_ids} | střed v obraze {pose.center_px} px | "
-          f"úhel v obraze {pose.angle_deg:+.2f}°")
-    x, y = sample.xy
+    if pose is None:
+        elapsed = result.t_capture - result.t_last_valid
+        print(f"Odhad z modelu točny | poslední detekce před {elapsed:.2f} s")
+    else:
+        marker_ids = ", ".join(str(marker_id) for marker_id in pose.visible_ids)
+        print(f"ArUco ID {marker_ids} | střed v obraze {pose.center_px} px | "
+              f"úhel v obraze {pose.angle_deg:+.2f}°")
+    x, y = result.xy
     print(f"Základna v souřadnicích robota XY ({x:.4f}, {y:.4f}) m | "
-          f"natočení {np.rad2deg(sample.yaw):+.2f}°")
+          f"natočení {np.rad2deg(result.yaw):+.2f}°")
 
 
 def measure_turntable(robot: CRS93Sim, detector: ArucoBlockDetector, homography: Homography,
-                      count: int, interval_s: float) -> TurntableModel:
+                      count: int, interval_s: float) -> tuple[TurntableModel, BaseMeasurement]:
     directory = CAPTURES / f"orbit_{capture_stamp()}"
     marker_z = homography.table_z_m + MARKER_HEIGHT_ABOVE_TABLE_M
     measurements = []
@@ -220,11 +222,11 @@ def measure_turntable(robot: CRS93Sim, detector: ArucoBlockDetector, homography:
     print(f"Osa XY {model.axis_xy.round(4)} m | poloměr {1000 * fit.radius_m:.1f} mm | "
           f"rychlost {np.rad2deg(fit.signed_omega):+.2f}°/s | perioda {fit.period_s:.2f} s")
     print(f"RMSE polohy {1000 * fit.xy_rmse_m:.2f} mm | model {path}")
-    return model
+    return model, measurements[-1]
 
 
-def dispatch(robot: CRS93Sim, detector: ArucoBlockDetector,
-             calibration: CameraCalibration, words: list[str]) -> bool:
+def dispatch(robot: CRS93Sim, calibration: CameraCalibration, words: list[str]) -> bool:
+    finder = calibration.aruco
     match words:
         case []:
             pass
@@ -264,23 +266,28 @@ def dispatch(robot: CRS93Sim, detector: ArucoBlockDetector,
         case ["camera", "snap"]:
             capture(robot)
         case ["aruco", "detect"]:
-            detect_markers(robot, detector, calibration.model)
+            detect_markers(robot, finder)
         case ["homo", "run"]:
-            calibration.model, calibration.path = calibrate_from_hoop(robot)
+            homography, path = calibrate_from_hoop(robot)
+            calibration.aruco = AdvancedArucoFinder(finder.detector, homography)
+            calibration.path = path
         case ["homo", "status"]:
             print("Zdroj kalibrace", calibration.path or "syntetická kalibrace simulátoru")
-            print("Projekční matice P [3×4]\n", calibration.model.P, sep="")
+            print("Projekční matice P [3×4]\n", finder.homography.P, sep="")
         case ["homo", "orbit", *options] if len(options) <= 2:
             count = int(options[0]) if options else 10
             interval = float(options[1]) if len(options) == 2 else 1.0
-            calibration.turntable = measure_turntable(robot, detector, calibration.model, count, interval)
+            model, last_sample = measure_turntable(robot, finder.detector, finder.homography, count, interval)
+            calibration.aruco = AdvancedArucoFinder(
+                finder.detector, finder.homography, model, last_measurement=last_sample,
+            )
         case ["homo", "predict", *options] if len(options) <= 1:
-            if calibration.turntable is None:
+            if finder.turntable is None:
                 raise RuntimeError("Nejdřív změř dráhu držáku příkazem homo orbit.")
             seconds = float(options[0]) if options else 0.0
             if not np.isfinite(seconds):
                 raise ValueError("Čas předpovědi musí být konečný.")
-            xy, yaw = calibration.turntable.measurement_at(time.monotonic() + seconds)
+            xy, yaw = finder.turntable.measurement_at(time.monotonic() + seconds)
             print(f"Předpověď pro t {seconds:+g} s | střed XY {xy.round(4)} m | natočení {np.rad2deg(yaw):+.2f}°")
         case _:
             print("Neznámý nebo neúplný příkaz. Zadej help.")
@@ -294,18 +301,18 @@ def main() -> None:
     if not 1 <= args.port <= 65535:
         parser.error("--port musí být v rozsahu 1 až 65535")
 
-    detector = ArucoBlockDetector()
     # Viser, animace a čas simulace běží ve vláknech Prokopova simulátoru.
     robot = CRS93Sim(port=args.port, collisions=False, keep_alive=False)
     try:
         robot.initialize(home=False)
-        calibration = CameraCalibration(simulated_homography(robot))
+        finder = AdvancedArucoFinder(ArucoBlockDetector(), simulated_homography(robot))
+        calibration = CameraCalibration(finder)
         print(f"Mainframe připraven. Viser běží na http://localhost:{robot.viewer.server.get_port()}")
         print("Seznam příkazů zobrazíš příkazem help.")
         while True:
             words = input("crs93-sim> ").lower().split()
             try:
-                if not dispatch(robot, detector, calibration, words):
+                if not dispatch(robot, calibration, words):
                     break
             except (ValueError, RuntimeError, OSError, AssertionError, cv2.error,
                     np.linalg.LinAlgError) as error:

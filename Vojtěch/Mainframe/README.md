@@ -18,7 +18,7 @@ Pokud už na portu 8080 běží jiná simulace, přidej `--port 8082` a otevři 
 | `robot wait` | Počká na dokončení pohybu, třeba před focením. |
 | `robot soft-home` | Vrátí robot do výchozí polohy. |
 | `camera snap` | Uloží snímek ze simulované kamery a aktualizuje panel **Camera** ve Viseru. |
-| `aruco detect` | Pořídí snímek, uloží originál i vyznačenou kopii a vypíše nalezená ID, střed a natočení v obraze i v souřadnicích robota. |
+| `aruco detect` | Pořídí snímek, uloží originál i vyznačenou kopii a vypíše polohu základny. Když značky zmizí, použije naměřený model točny a poslední platnou detekci. |
 | `homo run` | Projede kalibrační polohy, vyfotí obruč a spočítá projekční matici 3×4. |
 | `homo status` | Vypíše aktivní matici a zdroj kalibrace. |
 | `homo orbit [N [INTERVAL_S]]` | Vyfotí rotující držák a odhadne jeho dráhu. Výchozí je 10 snímků po 1 s. |
@@ -42,3 +42,5 @@ V panelu **Turntable** vyber **Random viable placement** a zapni **Spin**. Pro m
 Program používá aktivní homografii a rovinu ArUco značek 64,6 mm nad stolem. Čas snímku odhaduje odečtením latence kamery 0,11 s od času návratu `grab_image`. Výpočet potřebuje aspoň čtyři platné detekce a natočení aspoň o 20°. Mezi dvěma platnými snímky musí točna urazit méně než půl otáčky, aby šel určit směr. U prakticky vystředěného držáku se dráha zjednoduší na bod, natočení se dál předpovídá.
 
 Výstupy jsou v `captures/orbit_<čas>/`. `orbit.png` ukazuje dráhu a naměřené středy na posledním snímku se značkami. `orbit.json` obsahuje vzorky, parametry `TurntableModel` v metrech, radiánech a sekundách, poloměr, znaménkovou rychlost i chybu přizpůsobení. Nulová fáze odpovídá poslednímu snímku s detekcí a predikce v konzoli používá monotónní čas stejného běhu.
+
+Po `homo orbit` si `aruco detect` pamatuje poslední platnou detekci ze série. Každý další snímek se značkou ji může aktualizovat. Při zakrytí značek konzole vypíše odhad XY a natočení pro čas pořízení snímku a stáří poslední detekce. Po nové kalibraci kamery nebo změně polohy či rychlosti točny změř dráhu znovu pomocí `homo orbit`.
