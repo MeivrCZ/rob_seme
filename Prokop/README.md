@@ -101,6 +101,12 @@ The extra keyword arguments exist in the sim only:
   until the time they report is checked (at `time_scale` > 1 fast moves can
   then take more sim time than on the robot). This is the environment's
   ground truth; trajectory planning uses its own simplified collision model.
+- **Soft collisions for planning** (`solver/soft_collision.py`, details in
+  [docs/SOFT_COLLISION.md](docs/SOFT_COLLISION.md)). The model planning code
+  uses instead of the exact meshes: every body as a few boxes
+  (`models/soft/*_soft.urdf`), the task posed from the perceived `TurntableModel`,
+  dot-product tests only. `SoftScene(model).clearance(q, theta)` gives the
+  least distance (a guaranteed lower bound, margins subtracted) in ~1.5 ms.
 - **Clearance for tools.** `collision.ArmChecker` gives the clearance of the
   arm and hoop to the table and the cell, for a pose or along the joint-space
   path of a move (used to check poses before moving the real robot).
@@ -131,6 +137,9 @@ Prokop's parts so far:
 | `solver/approach.py` | P2.7 | collision-free approach paths: RRT + random shortcut (lab 6) against the cell, the table, the spinning task's swept volume and self-collision |
 | `solver/correction.py` | P3.4 | planned targets corrected for the turntable's actual phase: numerical IK (lab 5), finite-difference Jacobian (lab 4) |
 | `solver/executor.py` | P3.3 | runs a `Plan`: approach, wait for the start phase, send each step just in time with its correction, abort safely |
+| `solver/soft_collision.py` | — | soft collision model for planning: boxes from `models/soft/*_soft.urdf`, separating-axis distances (lower bounds), hierarchy; see [docs/SOFT_COLLISION.md](docs/SOFT_COLLISION.md) |
+| `solver/wire.py` | — | puzzle D's wire (centreline measured on the CAD) and its checkpoints at a granularity tier |
+| `solver/hoop_pose.py` | — | flange poses that put the ring centre on a checkpoint (side, tilt, roll); IK candidates |
 
 In the sim with the puzzle spinning (both directions) and a perfect tracker, the
 executor keeps the hoop target within 3 mm of its planned place on the puzzle,
@@ -151,6 +160,7 @@ from solver.timing import RobotTiming
 | [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | the experiments at the station (E1–E9): why, what, results, what changed |
 | [docs/ROBOT_CHECKS.md](docs/ROBOT_CHECKS.md) | safety rules, running the tools at the station, open checks |
 | [docs/SOLVER_PLAN.md](docs/SOLVER_PLAN.md) | the team's solver: pipeline, contracts, decisions, lab methods, tasks, split and status |
+| [docs/SOFT_COLLISION.md](docs/SOFT_COLLISION.md) | the soft collision model for planning: boxes, test, margins, validation |
 | [NOTIFY.md](NOTIFY.md) | notes for the team about changes that affect their code |
 
 The modules and tools have Google-style docstrings; `--help` on any tool prints
@@ -170,6 +180,8 @@ its usage.
 | `solver/` | Prokop's parts of the team's solver and the shared contracts (see above) |
 | `models/` | URDFs and STL meshes: robot with adapter, hoop, base, puzzles A–E, turntable |
 | `tools/robodk2urdf.py`, `step2stl.py`, `mesh_repair.py` | model generators (robot URDF from RoboDK, meshes from STEP) |
+| `tools/fit_soft_boxes.py` | fits the soft collision boxes to the models, writes `models/soft/*_soft.urdf` |
+| `experiments/validate_soft_collision.py` | checks the soft model against the exact meshes |
 | `tools/log_motion.py`, `camera_survey.py` | measurements on the real robot (also run against the sim) |
 | `tools/analyze_motion.py`, `analyze_survey.py` | analysis of the recorded experiments |
 | `experiments/` | recorded data: `motion_logs/real/`, `camera_survey/<date-time>/` |

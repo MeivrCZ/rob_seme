@@ -88,3 +88,23 @@ checkpoint at any turntable angle), the robot timing model (arrival times of
 queued moves), approach paths (RRT), phase corrections and the executor. A new
 task P2.8 (feasibility funnel: reach check, IK feasibility map, start-phase
 screening before the expensive search) was added to the planning phase.
+
+## Everyone: soft collision model for planning (2026-11-25)
+
+Planning code should not use the simulator's exact meshes (`collision.py`):
+they are the environment's ground truth. There is now a model for planning:
+`solver/soft_collision.py`, documented in `docs/SOFT_COLLISION.md`.
+
+- Every body is a few boxes in separate soft URDFs (`models/soft/*_soft.urdf`:
+  robot, hoop, puzzle D, base, turntable, cell); the original URDFs are
+  unchanged. The task is posed from the perceived `TurntableModel`.
+- `SoftScene(model).clearance(q, theta)` returns the least distance of the
+  arm (with the hoop) to the cell, table and task, and between arm parts, as a
+  lower bound with the margins subtracted (10 mm; hoop vs puzzle 3 mm), in
+  about 1.5 ms (exact meshes: 8.6 ms).
+- Validated against the exact meshes: the boxes contain every mesh vertex,
+  and in 500 random states the soft distance never exceeded the exact one.
+  Near the bar it accepts 94 % of the truly free configurations (67 % with
+  the margins).
+- The hoop's hole is 30.0 mm in radius in the CAD, not 31.2 mm (62.4 mm
+  diameter): about 23 mm of room around the bar.
