@@ -15,6 +15,12 @@ import sys
 BLOCKS = [
     ("whole backward search (plan_backward)", "planner.py", "plan_backward"),
     ("  final poses: stays free for a turn", "planner.py", "stays_free"),
+    ("  waiting pose at checkpoint 0 (waiting_entry)", "planner.py", "waiting_entry"),
+    ("  subdivision per checkpoint step (bisect)", "planner.py", "bisect"),
+    ("    a pose on the wire (solve_at)", "planner.py", "solve_at"),
+    ("      the candidate flange poses (targets)", "planner.py", "targets"),
+    ("      the orientation carried along the wire (carried)", "planner.py", "carried"),
+    ("    the projection onto the wire (project)", "planner.py", "project"),
     ("  tree search between checkpoints (reach)", "planner.py", "reach"),
     ("    direct try to the checkpoint (try_goal)", "planner.py", "try_goal"),
     ("    pose before a node on the wire (before)", "planner.py", "before"),

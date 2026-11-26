@@ -81,6 +81,7 @@ from solver.wire import (SEGMENT_NAMES, SUCCESS_HEIGHT, checkpoint_arclengths,
 SLACK = 1.15  # safety factor on the motion bound (the lever arms change during a step)
 MAX_JOINT_STEP = np.deg2rad(5.0)  # rad, largest joint change between two samples
 MIN_ALLOW = 0.0005  # m, a clearance below this counts as too close (steps would vanish)
+PER_PART_STEP = False  # each part's gap at its own speed (see _step): sound, but no gain (the hoop is the closest and the fastest part; 9.11)
 ENTRIES = (0.015, 0.03, 0.05, 0.08)  # m, entry distances tried before the open end
 PASS_LOG: Callable[[str], None] | None = None  # set to print a line per timing pass
 # Set to a callable to record why the space-time tree rejects an extension:
@@ -205,17 +206,26 @@ def _q_at(moves, q0: np.ndarray, t: float) -> np.ndarray:
     return q
 
 
-def _step(t: float, end: float, allow: float, levers: np.ndarray, moves, rates,
-          task_speed: float) -> float:
-    """Longest time step from t in which nothing moves further than allow [s]."""
+def _step(t: float, end: float, allow, levers: np.ndarray, moves, rates,
+          task_speed) -> float:
+    """Longest time step from t in which nothing moves further than allow [s].
+
+    allow / levers / task_speed: one bound (a float, levers (6,)), or one per part
+    (allows (P,), levers (P, 6), task speeds (P,)): each part may close in only by its
+    own gap, at its own speed (the per-part bound: a far, fast part does not shorten
+    the step of a near, slow one)."""
     dt = end - t
+    allow = np.atleast_1d(np.asarray(allow, float))
+    levers = np.atleast_2d(levers)
+    task_speed = np.broadcast_to(np.asarray(task_speed, float), allow.shape)
     for _ in range(4):  # the moves overlapping [t, t + dt] decide the speed
         active = [r for m, r in zip(moves, rates) if m.t0 < t + dt and m.t_end > t]
         rate = np.max(active, axis=0) if active else np.zeros(6)
-        speed = SLACK * float(levers @ rate) + task_speed
+        speed = SLACK * (levers @ rate) + task_speed
         limit = dt
-        if speed > 0:
-            limit = allow / speed
+        moving = speed > 0
+        if moving.any():
+            limit = float(np.min(allow[moving] / speed[moving]))
         if rate.max() > 0:
             limit = min(limit, MAX_JOINT_STEP / rate.max())
         if limit >= dt:
@@ -267,8 +277,24 @@ def check_moves(scene: SoftScene, angle: Callable[[float], float], omega: float,
                 break
             if t >= end:
                 break
-            t = min(t + _step(t, end, allow, scene.lever_arms(q), moves, rates, task_speed),
-                    end)
+            if PER_PART_STEP and c.part_gaps is not None:
+                # Per part: each part's gap at its own speed (the task turns: every part
+                # vs the task gets the task's speed), plus the arm against itself with
+                # the whole arm's bound (both parts of a self pair move).
+                gaps = c.part_gaps
+                near = np.isfinite(gaps)
+                L = scene.part_lever_arms(q)[near]
+                allows = np.append(gaps[near], c.self_gap / 2)
+                levers = np.vstack([L, scene.lever_arms(q)])
+                tasks = np.append(np.full(int(near.sum()), task_speed), 0.0)
+                if swept:  # the swept volume's distance is not per part: the whole arm
+                    allows = np.append(allows, c.distance)
+                    levers = np.vstack([levers, scene.lever_arms(q)])
+                    tasks = np.append(tasks, task_speed)
+                dt_step = _step(t, end, allows, levers, moves, rates, tasks)
+            else:
+                dt_step = _step(t, end, allow, scene.lever_arms(q), moves, rates, task_speed)
+            t = min(t + dt_step, end)
         checks.append(MoveCheck(k, SEGMENT_NAMES[segments[k]], samples, float(least),
                                 hits, t_hit))
     return checks, arrivals
@@ -1345,8 +1371,66 @@ BW_END_ANGLES = 6  # end angles tried (the top bar away from the robot first, 30
 BW_ROOTS = 3  # final configurations tried per end angle
 BW_TOTAL_LIMIT = 120.0  # s, per end angle
 BW_TILT = np.deg2rad(20.0)  # rad, the default ring tilt at a checkpoint (any roll)
+BISECT_DEPTH = 8  # binary subdivision levels at most (a safety cap; 0: the tree only)
+BISECT_MIN_SPACING = 0.010  # m of wire: a piece shorter than this is not split again
+# (user: a smallest distance between the stops instead of a fixed depth; a 10 mm piece
+# of the R50 bend is within s^2 / 8R = 0.25 mm of its chord)
+BISECT_LOG = None  # hook: called with a line per subdivision failure (diagnostics)
+BISECT_WIDE_TILT = np.deg2rad(50.0)  # rad, the grid fallback's largest tilt (every direction; as TILTS)
+BISECT_IK_TRIES = 12  # nearest IK solutions checked for collisions at a stop
+BISECT_START_CLEARANCE = 0.005  # m: start poses with this much clearance are preferred
+BISECT_DISTINCT = np.deg2rad(5.0)  # rad: candidates closer than this are the same branch
+BISECT_ALTERNATIVES = ST_ARRIVALS  # start candidates tried per checkpoint (the retries)
+BW_TREE = False  # the backward tree as a fallback (off: the subdivision only)
+BISECT_WIRE_STEP = 0.002  # m, the wire sampled for the perpendicular projection
+BISECT_END_GAP = 0.005  # m, a projected stop keeps this far from the stretch's ends
 BW_END_CHECKED = 40  # final configurations (most clearance first) checked for waiting at the end
 BW_END_STEP = np.deg2rad(5.0)  # rad, angle step of that check (a full turn)
+
+
+def _skew(w: np.ndarray) -> np.ndarray:
+    return np.array([[0.0, -w[2], w[1]], [w[2], 0.0, -w[0]], [-w[1], w[0], 0.0]])
+
+
+def se3_log(T: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The twist (w, v) of a rigid transform: T = exp([w, v])."""
+    R, p = T[:3, :3], T[:3, 3]
+    c = np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)
+    th = float(np.arccos(c))
+    if th < 1e-9:
+        return np.zeros(3), p.copy()
+    if np.pi - th < 1e-6:  # half a turn: the axis from R + I
+        k = int(np.argmax(np.diag(R)))
+        axis = (R[:, k] + np.eye(3)[:, k]) / np.sqrt(2.0 * (1.0 + R[k, k]))
+        w = th * axis
+    else:
+        w = th / (2.0 * np.sin(th)) * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0],
+                                                 R[1, 0] - R[0, 1]])
+    W = _skew(w)
+    V_inv = np.eye(3) - 0.5 * W + (1.0 / th ** 2) * (
+        1.0 - th * np.sin(th) / (2.0 * (1.0 - np.cos(th)))) * (W @ W)
+    return w, V_inv @ p
+
+
+def se3_exp(w: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """The rigid transform of the twist (w, v)."""
+    th = float(np.linalg.norm(w))
+    W = _skew(w)
+    T = np.eye(4)
+    if th < 1e-9:
+        T[:3, :3] = np.eye(3) + W
+        T[:3, 3] = v
+        return T
+    A, B = np.sin(th) / th, (1.0 - np.cos(th)) / th ** 2
+    T[:3, :3] = np.eye(3) + A * W + B * (W @ W)
+    T[:3, 3] = (np.eye(3) + B * W + (th - np.sin(th)) / th ** 3 * (W @ W)) @ v
+    return T
+
+
+def se3_interpolate(Ta: np.ndarray, Tb: np.ndarray, u: float) -> np.ndarray:
+    """The pose a fraction u along the geodesic from Ta to Tb: Ta exp(u log(Ta^-1 Tb))."""
+    w, v = se3_log(np.linalg.inv(Ta) @ Tb)
+    return Ta @ se3_exp(u * w, u * v)
 
 
 def end_angles(model: TurntableModel, count: int = BW_END_ANGLES,
@@ -1374,7 +1458,7 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
     """
     from solver import rrt as rrt_mod
     t_wall = time.monotonic()
-    scene = scene or SoftScene(model)
+    scene = scene or SoftScene(model, restricted=True)
     q_lo, q_hi = kin.q_min + joint_margin, kin.q_max - joint_margin
 
     def in_room(q) -> bool:
@@ -1545,6 +1629,176 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
             reach_progress[0] = ((arclength[k + 1] - min(progress)) / span) if span > 0 else 1.0
             return found, len(nodes)
 
+        # --- Binary subdivision (user design, 2026-11-26): the straight joint move
+        # between the ends of a stretch of wire; if it collides, its midpoint's ring
+        # centre is projected perpendicularly onto the wire (within the stretch), a
+        # stop is put there (position-only IK closest to the move's midpoint) and both
+        # halves are done the same way, the later half first (backwards in time: what
+        # is later stays fixed; the earlier start is re-solved at its new time).
+        # Every accepted piece is one straight joint move: a polyline through the 4D
+        # wire (space and time), refined only where a straight move cannot follow it.
+        wire_s = np.arange(0.0, arclength[-1] + 1e-9, BISECT_WIRE_STEP)
+        wire_pts = np.array([wire_frame_at(x, entry)[:3, 3] for x in wire_s])
+        bisect_stats = {"pieces": 0, "fallback": 0, "early_backtracks": 0}
+        bisect_fail = [None]  # why the last subdivision failed ("start": no start pose)
+
+        def project(ring_world, t, s_lo, s_hi) -> float:
+            """Arclength of the foot of the perpendicular from the ring centre onto the
+            wire within (s_lo, s_hi); the middle of the stretch if the closest point is
+            at an end of it (no foot inside: the subdivision would stall)."""
+            local = (np.linalg.inv(model.puzzle_T(angle(t))) @ np.append(ring_world, 1.0))[:3]
+            inside = (wire_s > s_lo + BISECT_END_GAP) & (wire_s < s_hi - BISECT_END_GAP)
+            if not inside.any():
+                return 0.5 * (s_lo + s_hi)
+            idx = np.flatnonzero(inside)
+            best = idx[int(np.argmin(np.linalg.norm(wire_pts[idx] - local, axis=1)))]
+            if best in (idx[0], idx[-1]):
+                return 0.5 * (s_lo + s_hi)
+            return float(wire_s[best])
+
+        flange_of_ring = np.linalg.inv(to_ring)
+        roll_R = [np.array([[np.cos(r), -np.sin(r), 0.0], [np.sin(r), np.cos(r), 0.0],
+                            [0.0, 0.0, 1.0]]) for r in rolls]
+        wide = [o for o in grid if o[1] <= BISECT_WIDE_TILT + 1e-9
+                and np.isclose(o[0], grid[0, 0])]  # one roll each (the roll is looped)
+
+        def ring_in_puzzle(q, t) -> np.ndarray:
+            return np.linalg.inv(model.puzzle_T(angle(t))) @ kin.fk(q) @ to_ring
+
+        def carried(q_next, t_next, s_next, s_point) -> np.ndarray:
+            """q_next's ring orientation (puzzle frame) carried along the wire to s_point
+            (turned with the wire's tangent)."""
+            R_next = ring_in_puzzle(q_next, t_next)[:3, :3]
+            F_next = wire_frame_at(s_next, entry)[:3, :3]
+            F_here = wire_frame_at(s_point, entry)[:3, :3]
+            return F_here @ F_next.T @ R_next
+
+        def solve_at(s_point, q_next, t_next, q_ref, start_of=None, preferred=(), alt=0):
+            """A configuration with the ring on the wire at s_point, timed so it reaches
+            (q_next, t_next); position only, in the joint room, collision free at its
+            time, the IK closest to q_ref. Orientations: the preferred ones (rotations in
+            the puzzle frame, the roll about the ring axis free), then the grid up to
+            BISECT_WIDE_TILT in every tilt direction. With start_of = 0: checkpoint 0
+            (any entry distance, a waiting pose).
+
+            The candidates (the nearest BISECT_IK_TRIES free solutions per place, distinct
+            branches) are ranked: those with at least BISECT_START_CLEARANCE first, the
+            closest to q_ref first; then the rest, the most clearance first (a pose
+            nearly touching makes every move from it touch at once: seed 1's jog). alt
+            picks the alt-th (0: the best; the retries take the next ones, instead of the
+            tree)."""
+            points = [s0 for _, s0 in stops] if start_of == 0 else [s_point]
+            ranked = []
+            # Cheap first (the profile: 4000 IK calls per pose, 78 % of the time): the
+            # preferred orientations, the wide grid only if they give too few; the
+            # candidates generated once at the first time estimate, the time's fixed
+            # point refined only for the candidates used, each with its own orientation.
+            t_guess = t_next - duration(q_ref, q_next)
+            for sp in points:
+                p_local = wire_frame_at(sp, entry)[:3, 3]
+                F_local = wire_frame_at(sp, entry)
+
+                def target(spec, t):
+                    P = model.puzzle_T(angle(t))
+                    if spec[0] == "R":
+                        T = np.eye(4)
+                        T[:3, :3], T[:3, 3] = spec[1], p_local
+                        return P @ T @ flange_of_ring
+                    _, roll, tilt, direction = spec
+                    return flange_target(P @ F_local, roll, face, tilt, direction)
+
+                groups = ([("R", R @ Rr) for R in preferred for Rr in roll_R],
+                          [("grid", float(r), float(o[1]), float(o[2]))
+                           for o in wide for r in rolls])
+                for group in groups:
+                    if not group:
+                        continue
+                    cands = [(x, spec) for spec in group
+                             for x in kin.ik(target(spec, t_guess)) if in_room(x)]
+                    cands.sort(key=lambda c: float(np.abs(c[0] - q_ref).max()))
+                    here = []
+                    for x, spec in cands:
+                        if len(here) >= BISECT_IK_TRIES:
+                            break
+                        if any(np.abs(x - y).max() < BISECT_DISTINCT for y, *_ in here):
+                            continue  # the same branch as one already kept
+                        for _ in range(2):  # its time depends on its move to q_next
+                            tx = t_next - duration(x, q_next)
+                            sols = [y for y in kin.ik(target(spec, tx)) if in_room(y)]
+                            if not sols:
+                                x = None
+                                break
+                            x = min(sols, key=lambda y: float(np.abs(y - x).max()))
+                        if x is None:
+                            continue
+                        tx = t_next - duration(x, q_next)
+                        c = scene.clearance(x, angle(tx))
+                        if not c.free:
+                            continue
+                        if start_of == 0 and waiting_entry(x, tx) is None:
+                            continue
+                        here.append((x, tx, float(np.abs(x - q_ref).max()),
+                                     min(c.distance, c.self_gap)))
+                    roomy = sorted((h for h in here if h[3] >= BISECT_START_CLEARANCE),
+                                   key=lambda h: h[2])
+                    tight = sorted((h for h in here if h[3] < BISECT_START_CLEARANCE),
+                                   key=lambda h: -h[3])
+                    ranked += roomy + tight
+                    if len(ranked) > alt:
+                        break  # enough from the preferred ones: the grid is not needed
+                if len(ranked) > alt:
+                    break  # the nearest entry that works (checkpoint 0)
+            if alt < len(ranked):
+                return ranked[alt][0], ranked[alt][1]
+            return None
+
+        def bisect(s_a, q_next, t_next, s_next, depth, k_start=None, q_ref=None,
+                   preferred=(), alt=0):
+            """Forward path [(q, t), ...] from the ring at s_a to (q_next, t_next), or None.
+            The start's IK is the one closest to q_ref (default q_next); its orientation:
+            the preferred ones, then q_next's carried along the wire, then the grid."""
+            start = solve_at(s_a, q_next, t_next, q_next if q_ref is None else q_ref,
+                             start_of=k_start,
+                             preferred=list(preferred) + [carried(q_next, t_next, s_next, s_a)],
+                             alt=alt if depth == BISECT_DEPTH else 0)
+            if start is None:
+                if depth == BISECT_DEPTH:  # no pose at the stretch's start at all
+                    bisect_fail[0] = "start"
+                if BISECT_LOG is not None:
+                    BISECT_LOG(f"{'  ' * (BISECT_DEPTH - depth)}no free IK on the wire at "
+                               f"s {1000 * s_a:.0f} mm (stretch to {1000 * s_next:.0f} mm)")
+                return None
+            q_a, t_a = start
+            if move_free(q_a, q_next, t_a):
+                bisect_stats["pieces"] += 1
+                return [(q_a, t_a), (q_next, t_next)]
+            if BISECT_LOG is not None:
+                chk = check_moves(scene, lambda x: angle(t_a + x), model.omega, timing,
+                                  np.array([q_a, q_next]), np.array([-1, 0]))[0][0]
+                BISECT_LOG(f"{'  ' * (BISECT_DEPTH - depth)}straight s {1000 * s_a:.0f} -> "
+                           f"{1000 * s_next:.0f} mm collides: {chk.hits[0] if chk.hits else '?'}"
+                           f" at {chk.t_hit or 0:.2f} s of {duration(q_a, q_next):.2f} s")
+            if depth == 0 or s_next - s_a < 2.0 * BISECT_MIN_SPACING:
+                return None  # the halves would be shorter than the smallest spacing
+            # The midpoint in task space (user): the ring's pose relative to the puzzle
+            # halfway along the geodesic Ta exp(1/2 log(Ta^-1 Tb)); its position
+            # projected perpendicularly onto the wire, its orientation tried first.
+            q_mid = 0.5 * (q_a + q_next)
+            t_mid = t_a + 0.5 * duration(q_a, q_next)
+            L_mid = se3_interpolate(ring_in_puzzle(q_a, t_a), ring_in_puzzle(q_next, t_next),
+                                    0.5)
+            ring_world = (model.puzzle_T(angle(t_mid)) @ L_mid)[:3, 3]
+            s_m = project(ring_world, t_mid, s_a, s_next)
+            later = bisect(s_m, q_next, t_next, s_next, depth - 1, q_ref=q_mid,
+                           preferred=[L_mid[:3, :3]])
+            if later is None:
+                return None
+            q_m, t_m = later[0]
+            earlier = bisect(s_a, q_m, t_m, s_m, depth - 1, k_start, q_ref=q_a)
+            if earlier is None:
+                return None
+            return earlier + later[1:]
+
         # The roots: free final configurations with the ring low enough, most clearance first.
         final = model.checkpoint_T(path, n - 1, angle(0.0))
         roots = []
@@ -1589,7 +1843,34 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
                 (q_from, t_from), orient_from = arrival[k + 1]
                 order = orientations if not tried[k] else orientations[:ST_RETRY_ORIENTATIONS]
                 found = None
-                for orient in order:
+                skip_tree = not BW_TREE
+                if BISECT_DEPTH > 0:
+                    # The subdivision from the stretch's start candidates in turn (the
+                    # retries after a backtrack continue with the next ones): every one
+                    # gives a different arrival; deterministic, no sampling.
+                    s_from = arclength[k + 1]
+                    for alt in range(len(tried[k]), BISECT_ALTERNATIVES):
+                        bisect_fail[0] = None
+                        segment = bisect(arclength[k], q_from, t_from, s_from, BISECT_DEPTH,
+                                         k_start=0 if k == 0 else None, alt=alt)
+                        if PASS_LOG is not None:
+                            PASS_LOG(f"  back to checkpoint {k} by subdivision (start "
+                                     f"candidate {alt + 1}) from t {t_from:.2f} s: "
+                                     + ("NOT found" if segment is None else
+                                        f"{len(segment) - 1} straight move(s), reached at t "
+                                        f"{segment[0][1]:.2f} s"))
+                        if segment is not None and all(
+                                abs(segment[0][1] - a[1]) > ST_DIFFERENT[0]
+                                or np.abs(segment[0][0] - a[0]).max() > ST_DIFFERENT[1]
+                                for a in tried[k] if a is not None):
+                            found = (segment, orientations[0])
+                            break
+                        if bisect_fail[0] == "start":  # no further candidate at the start
+                            bisect_stats["early_backtracks"] += 1
+                            break
+                    if found is None and BW_TREE:
+                        bisect_stats["fallback"] += 1
+                for orient in (order if found is None and not skip_tree else ()):
                     segment, count = reach(k, orient, q_from, t_from, orient_from)
                     new = segment is not None and all(
                         abs(segment[0][1] - a[1]) > ST_DIFFERENT[0]
@@ -1633,20 +1914,10 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
                                        np.zeros(len(path), int))
                 return not any(m.hits for m in moves)
 
-            # Shortcuts: a shortcut makes every later move earlier (the puzzle is at a
-            # different angle then), so one is kept only if the WHOLE path stays free.
-            qs = [q for q, _ in waypoints]
-            for _ in range(rrt_mod.SHORTCUT_TRIES):
-                if len(qs) < 3:
-                    break
-                i, j = sorted(rng.choice(len(qs), size=2, replace=False))
-                if j - i < 2:
-                    continue
-                candidate = qs[:i + 1] + qs[j:]
-                if all(duration(a, b) <= ST_MAX_MOVE for a, b in zip(candidate, candidate[1:])) \
-                        and path_free(candidate):
-                    qs = candidate
-            qs = np.array(qs)
+            # No global shortcut pass: the subdivision's pieces are straight moves
+            # already (it rechecked the whole path per shortcut: ~30 % of the time).
+            qs = np.array([q for q, _ in waypoints])
+            result.bisect_stats = dict(bisect_stats)
             result.feasible, result.qs = True, qs
             result.orientations = np.array([arrival[j][1] for j in range(n)])
             result.moves, result.arrivals = check_moves(scene, fwd, model.omega, timing, qs,
@@ -1743,9 +2014,11 @@ def _usable(theta, result, approach_from) -> bool:
 
 def _margin_scene(model, margins) -> SoftScene:
     """The soft scene with the run's hoop-puzzle margin (solver.uncertainty)."""
+    # restricted: only the pairs that can touch (validated: experiments/
+    # validate_restricted_pairs.py, 0 missed collisions in 4130 poses near the task)
     if margins is None:
-        return SoftScene(model)
-    return SoftScene(model, hoop_puzzle_margin=margins.hoop_puzzle)
+        return SoftScene(model, restricted=True)
+    return SoftScene(model, hoop_puzzle_margin=margins.hoop_puzzle, restricted=True)
 
 
 def _backward_job(job):

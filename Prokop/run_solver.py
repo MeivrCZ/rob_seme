@@ -387,6 +387,15 @@ def phase2_prokop(kin: CRS93, model: TurntableModel, speed: float, log: Log,
         record["margins"] = {"hoop_puzzle_mm": 1000 * margins.hoop_puzzle,
                              "joint_limit_deg": float(np.rad2deg(margins.joint_limit)),
                              "sd_angle_deg": float(np.rad2deg(margins.sd_angle))}
+    # The reachability map (tools/build_reachability_map.py): a quick screen first.
+    from solver.reachability import MAP_PATH, ReachabilityMap
+    if MAP_PATH.exists():
+        t_map = time.monotonic()
+        reach_ok, reach_text = ReachabilityMap.load().check(model)
+        log(f"P2: reachability map ({1000 * (time.monotonic() - t_map):.0f} ms): {reach_text}")
+        record["reachability"] = reach_text
+        if not reach_ok:
+            raise PhaseFailed(f"unreachable (reachability map): {reach_text}")
     angles = planner.end_angles(model)
     log(f"P2: backwards in time from {len(angles)} end angles "
         f"({', '.join(deg(a) for a in angles)}), {planner.BW_WORKERS} processes, speed {speed}")

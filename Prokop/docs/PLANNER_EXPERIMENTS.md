@@ -498,8 +498,191 @@ agree; the truth needed ≤ 0.15°).
   23–56 s): plans arrive too late (predicted ends 126–150 s) or not within 98 s.
   Next: the plan library / seeding trees (user idea, section 10).
 
+### 9.8 Binary subdivision (kept) and path optimisation (tried, dropped)
+
+**Binary subdivision** (user design; `plan_backward`, the first try per checkpoint
+step, the tree as fallback; `BISECT_DEPTH = 4`): the straight joint move from the
+checkpoint to the next arrival; if it collides, the move's midpoint is taken in task
+space — the ring's pose relative to the puzzle halfway along the SE(3) geodesic
+T_a exp(1/2 log(T_a^-1 T_b)) (user) — projected perpendicularly onto the wire within
+the stretch, a stop put there (position-only IK closest to the midpoint, its
+orientation tried first), both halves the same way, the later half first (backwards
+in time nothing planned changes again). Every piece is one straight joint move, so no
+decimation is needed (user); the global shortcut pass was dropped. The robot can only
+move straight in joint space (`ctu_crs.move_to_q` = `coordmv`); a task-space line
+would be many stops. A stretch's start: the neighbouring pose's orientation carried
+along the wire first, then tilts up to 30° in every direction (the first version only
+tried one tilt direction: no pose at checkpoint 1).
+
+One end angle each, margins 6 mm / 5.5° (`bisect_compare.py` in the scratch, the
+same planner with `BISECT_DEPTH` 4 or 0):
+
+| Placement | tree only | subdivision |
+|---|---|---|
+| (0.487, 0), end angle 0 | no plan (150 s) | plan in 70 s, 10 waypoints, traversal 6.4 s |
+| (0.43, −0.05), spin − | no plan (138 s) | **plan in 32 s**, 7 waypoints, 4.8 s |
+| (0.45, +0.10), yaw 60° | no plan (125 s) | **plan in 31 s**, 8 waypoints, 5.7 s |
+| (0.55, +0.08), spin − | no plan (128 s) | plan in 74 s, 9 waypoints, 5.7 s |
+| seed 1 (edge) | plan in 110 s, 17 waypoints, 10.2 s | no plan (149 s) |
+| (0.487, 0), end angle 1; (0.52, −0.10) | no plan | no plan |
+
+Most checkpoint steps are a single straight move (no subdivision needed at all in
+two cases): fewer stops, shorter traversals, and ~30 s instead of ~110 s when it works.
+
+**Path optimisation** (user idea, `experiments/optimize_path.py`,
+`experiments/refine_path.py`; dropped): the traversal as one problem — the wire's
+4D path backwards from the end, unknowns the joint configurations, target
+Σ|ring centre − wire point|² + λ Σ|Δq|², scipy. What it took and showed:
+
+1. distance only, times fixed and alternated (L-BFGS-B): converges in 1 s to 0.5 mm,
+   but the ring stands edge-on (85°) and collides (nothing fixes the orientation);
+2. two walls on the distance (user) made **tilt-dependent**: D(tilt) = R cos tilt −
+   the bar's half-diagonal − the ring's half-thickness − margin (no room beyond ~57°),
+   a log barrier; needs a start inside the walls (a continuous IK of position + ring
+   axis along the tangent, roll free); diverged because re-timing between rounds
+   moved the targets by seconds;
+3. **times as unknowns** (user) with "the robot may wait" (gap ≥ the move's duration,
+   a smooth upper bound), SLSQP: the ring within 1 mm and ≤ 55°, 12.5 s — but the arm
+   (adapter, link4) hit the base: nothing in the target knew the arm;
+4. the arm as a **soft constraint** (user: convex boxes apart = a union of
+   halfspaces; the separating-axis gap, penalty max(0, margin − gap)²): ≥ 9.7 mm at
+   the points, still collisions between them and while waiting; 198 s;
+5. as a **refinement** of the subdivision planner's path (terms along the moves and the
+   waits): the objective fell 5×, but the path got worse — clearance 3.7 → −0.4 mm
+   (ring against the jog between the samples), tilts up to 55°, 1.9 s of waiting;
+   157 s.
+
+Verdict (user): dropped. It needs a good start and constraints along the whole motion
+(what the planner already provides), and with finite differences it is far too slow;
+the subdivision planner's paths are already lean (7–10 waypoints, 5–6 s).
+
+**Without the tree** (after 9.9): the subdivision alone, deterministic.
+
+* **Early backtracking:** if a stretch's start has no pose from this arrival, back to
+  another arrival at once (the tree had little chance from there).
+* **A smallest spacing instead of a fixed depth** (user): a piece shorter than
+  2 × 10 mm of wire is not split again (cap 8 levels); at seed 1's jog it had split
+  down to 2 mm pieces.
+* **Start poses by clearance:** of the nearest free IK solutions (distinct branches),
+  the closest with ≥ 5 mm clearance, else the most clearance; **retries** take the
+  2nd, 3rd candidate instead of sampling a tree (`BW_TREE = False`).
+* **Start orientations up to 50° of tilt** (were 30°): the jog and the bend's start
+  need them (seed 1, central end angle 1 had no pose at a checkpoint).
+
+| Placement (one end angle, 6 mm / 5.5° margins) | plan | waypoints | traversal | least soft clearance |
+|---|---|---|---|---|
+| (0.487, 0), end angle 0 | 42 s | 9 | 4.8 s | 2.0 mm |
+| (0.487, 0), end angle 1 | 77 s | 11 | 7.6 s | 1.5 mm |
+| (0.43, −0.05), spin − | 40 s | 7 | 4.9 s | 2.6 mm |
+| (0.45, +0.10), yaw 60° | 46 s | 8 | 4.2 s | 0.7 mm |
+| (0.52, −0.10), yaw −90° | 47 s | 8 | 5.7 s | 1.6 mm |
+| (0.55, +0.08), spin − | 28 s | 7 | 4.8 s | 3.6 mm |
+| seed 1 (edge) | 38 s | 9 | 6.7 s | 3.2 mm |
+
+**7 of 7**, against 1 of 6 for the tree alone (110 s, 17 waypoints, 10.2 s).
+
+### 9.9 Task-space small moves between the checkpoints (tried, dropped)
+
+User experiment (`experiments/taskspace_path.py`): between two checkpoints, the ring's
+pose relative to the puzzle along the SE(3) geodesic T_a exp(s log(T_a^-1 T_b)) at
+discrete s, IK at every sample on the turning puzzle (backwards from the end), a stop
+at every sample, no decimation. For frames whose z axis is the wire's tangent the
+geodesic is the wire itself (a line; the R50 arc as a screw motion).
+
+* One tilt and roll relative to the wire for the whole puzzle (planner's side B,
+  tilt 0° / 20°, all 24 rolls): **no IK along the whole path for any roll** — with
+  tilt 0 the arm runs out in the bend (the ring turns 90° with the wire there), with
+  20° the end pose in the stem is unreachable. The planner's per-checkpoint tilt and
+  roll are needed.
+* On the subdivision planner's waypoints (7, its checkpoint poses), task-space moves
+  between them instead of its straight joint moves (5 / 10 mm steps): **no IK at
+  sample 31 of 54 / 13 of 29**. The same samples at the planner's own times: IK in the
+  joint room at **every** one. So the cause is the timing: the robot stops after every
+  move (`move_to_q` blends only moves in exactly the same joint direction), 54 small
+  moves take far longer than 6 straight ones, the earlier samples move back in time,
+  the puzzle has turned further and the poses leave the arm's room — the finding of
+  `follow_bar.py` (9.3) again.
+
+Verdict (user): dropped. Task-space paths would only pay off if the robot could pass
+waypoints without stopping (the controller's `COORDISCONT` blending, not exposed by
+`ctu_crs`: open idea); for this robot, long straight joint moves are the right shape.
+
+### 9.10 A baseline, batch 4, the reachability map
+
+**Baseline** (user, `experiments/baseline_walk.py`): the wire in points a fixed
+distance apart, walked backwards from an end pose: per point the time predicted
+from the Jacobian (dq = J+ dx) and the measured trapezoid profile, the IK at that
+angle closest to the previous configuration (damped least squares on the ring centre
+and the ring axis along the tangent, roll free; the orientation carried exactly along
+the tangent left the joint room within a few points), the true time, a correction at
+the true time, the residual offset compensated in the next target. (0.43, −0.05),
+spin −:
+
+| spacing | result |
+|---|---|
+| 5 mm, 10 mm | no IK in the bend (point 6 / 3): the stops add up, the puzzle turns the later points out of reach |
+| 20 mm | complete: 13 points, traversal 9.5 s, joint steps ≤ 65°; off-centre 7.7 mm with the predicted time → **2.7 mm after the correction**; 2 of 12 moves collide (ring – vertical run, ring – base) |
+| 40 mm | no IK on the top bar (too large a step) |
+
+Against the subdivision on the same placement (7 waypoints, 4.9 s, no collision):
+the stops only where a straight move cannot follow the wire make the difference.
+
+**Batch 4** (20 seeds, the subdivision only, no tree): **9 successes, all within
+120 s** (74–117 s), 9 unreachable at perception (the same edge placements), 2 at
+planning (seeds 12, 15: no plan ending in time) — of the 11 placements the camera
+sees, 9 (batch 3, with the tree: 3).
+
+**Reachability map** (user; `tools/build_reachability_map.py` →
+`solver/data/reachability_map.npz`, `solver/reachability.py`): a checkpoint's
+reachability depends only on the puzzle's pose relative to the robot (turning about
+the robot's base axis changes only joint 1): per checkpoint a 2D map over ρ (the
+puzzle origin's distance from the base axis, 0.30–0.75 m, 1 cm) and ψ (its heading
+relative to the line to the robot, 10°); reachable = side B, an orientation of a
+reduced grid, the IK within the limits minus 5.5°, free in the soft model (6 mm).
+Built in 149 s (6 processes); every checkpoint reachable in 72 % of the cells,
+nothing beyond ρ = 0.72 m. At the start of planning (`run_solver.py`, ~1 s): per
+checkpoint the turntable angles at which it is reachable, and the **start angles from
+which every checkpoint is reachable when the traversal gets there**; unreachable
+straight away if a checkpoint is reachable at no angle or no start angle works.
+On batch 4: no success flagged; within a placement the entry and the top bar are
+reachable at only 68–92 % of the angles (the user's "not reachable in every phase"),
+64–82 % of the start angles work; at 0.80 m everything is unreachable, at 0.28 m
+(the robot's base) each checkpoint is reachable at 24 % of the angles but no start
+angle reaches them all in time.
+
+### 9.11 Why the subdivision took long, and the collision pairs
+
+**Profile** (central placement, end angle 1, 148 s under the profiler): 78 % in
+`solve_at` — **122 328 analytic IK calls**, ~4000 per pose: every pose generated all
+~500 flange poses (the preferred orientations and the whole fallback grid) and did so 4
+times (3 rounds of its time's fixed point + the check). Rewritten: the preferred
+orientations first, the grid only if they give too few; the candidates generated once,
+the time refined only for the candidates used, each with its own orientation → **9 814
+IK calls, 41 s**. Over the 7 test cases the total stayed about the same (318 → 320 s):
+the cheaper candidates sometimes lead to more pieces, and each piece's continuous check
+(~0.7–0.8 s) is now the main cost (56 %).
+
+**Which pairs can touch** (user): self-contacts with the exact meshes over 24 000 random
+configurations within the joint limits minus 5.5°: **the bare arm never touches
+itself**; the only contact is the hoop against the robot's base (0.02 %). The puzzle,
+its base and the turntable can only be reached by the forearm onward; the cell by no
+configuration (user). `SoftScene(restricted=True)` (planning): links 4–6, the adapter
+and the hoop against the base and the puzzle and the turntable; every moving link
+against the table; self only the hoop against the base and against link 4 (near the
+task the soft boxes of the ring and the forearm touch: 4 of 4130 missed without it).
+`experiments/validate_restricted_pairs.py`: **0 missed collisions** in 4130 poses near
+the task; 3.1 → 2.4 ms per query. The 7 test cases: **the same plans, 320 → 267 s**.
+
+**Per-part step bound** (each part's gap at its own speed, `PER_PART_STEP`): sound (on
+54 random moves the same verdicts) but no gain (59 vs 62 samples per move, slower
+overall): the hoop is the closest and the fastest part. Off.
+
 ## 10. Open ideas (not built yet)
 
+- **The ring against the wire analytically** (planning time, 9.11): a torus against the
+  wire's thick centreline instead of ~40 ring boxes against the puzzle's boxes at every
+  sample of a continuous check (the dominant pair); to be validated against the exact
+  meshes like the boxes.
 - **Parallel end angles** (planning time): one process per end angle, first plan wins.
 - **Null-space steps** (user): with only the ring centre fixed the arm can
   reconfigure (tilt, tilt direction, roll) while the ring stays put, e.g. to
@@ -535,6 +718,10 @@ All run from the repo root (`uv run python Prokop/experiments/<script>`).
 | `checkpoint_timeline.py [START_OFFSET]` | free poses per checkpoint against the clock |
 | `first_spin_move.py` | the first spinning move traced |
 | `backward_plan.py [YAW SPEED AXIS OFFSET [N]]` | the backward planner on a model, per end angle, with rejection tallies |
+| `baseline_walk.py [--spacing ...]` | the point-by-point baseline (9.10) |
+| `../tools/build_reachability_map.py` | builds the reachability map (9.10) |
+| `taskspace_path.py [--from-plan]` | task-space small moves between the checkpoints (9.9, dropped) |
+| `optimize_path.py`, `refine_path.py` | the path optimisation experiments (9.8, dropped) |
 | `execution_replay.py RUN/execution.pkl` | a simulated execution offline: tracker frame by frame (re-rendered), stamp lateness, step timing |
 | `profile_breakdown.py RUN.prof` | where a profiled planning run's time goes, by planner block |
 | `spin_sanity.py AX AY OX OY [YAW_DEG [DIR [SPEED]]]` | spinning plan on the true model + exact replay with the puzzle turning |

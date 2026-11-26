@@ -62,6 +62,18 @@ REFINE = 0.02  # m, pairs closer than this (margin subtracted) are refined
 SELF_EXCLUDED = {frozenset(("link4", "link6"))}
 ARM_ORDER = ("base_link", "link1", "link2", "link3", "link4", "link5", "link6",
              "adapter", "hoop")  # joint neighbours are adjacent here
+# restricted=True (planning): only the pairs that can touch. Measured (exact meshes,
+# 24 000 random configurations within the joint limits minus 5.5 deg): the bare arm
+# never touches itself; the only self-contact is the hoop against the robot's base
+# (0.02 %). The puzzle, its base and the turntable can only be reached by the forearm
+# onward in the work area; the cell walls by no configuration (user). The table stays
+# for every moving link.
+RESTRICTED_NEAR_TASK = {ARM_ORDER.index(x) for x in ("link4", "link5", "link6",
+                                                    "adapter", "hoop")}
+RESTRICTED_SELF = (("hoop", "base_link"), ("hoop", "link4"))  # the latter: near the task
+# with the hoop tilted back the soft boxes of the ring and the forearm touch
+# (experiments/validate_restricted_pairs.py: 4 of 4130 missed without it)
+
 
 
 def _origin(element: ET.Element | None) -> np.ndarray:
@@ -198,6 +210,7 @@ class SoftClearance:
     pair: tuple[str, str]
     self_gap: float
     self_pair: tuple[str, str]
+    part_gaps: np.ndarray | None = None  # per ARM_ORDER part, its least gap to the scene
 
     @property
     def free(self) -> bool:
@@ -259,7 +272,7 @@ class SoftScene:
 
     def __init__(self, model: TurntableModel, margin: float = MARGIN,
                  hoop_puzzle_margin: float = HOOP_PUZZLE_MARGIN,
-                 self_margin: float = SELF_MARGIN) -> None:
+                 self_margin: float = SELF_MARGIN, restricted: bool = False) -> None:
         data = _data()
         self.model = model
         self.table_z = data["table_z"]
@@ -317,6 +330,19 @@ class SoftScene:
         self._theta: float | None = None
         ia, ib = np.meshgrid(self._arm_roots, self._obs_roots, indexing="ij")
         self._env_roots = (ia.ravel(), ib.ravel())
+        self._tt_roots = self._arm_roots
+        self.restricted = restricted
+        if restricted:  # only the pairs that can touch (docs/PLANNER_EXPERIMENTS.md 9.11)
+            near = np.array([self._arm_part[r] in RESTRICTED_NEAR_TASK for r in self._arm_roots])
+            task = np.array([obs.tag[r] != "cell" for r in self._obs_roots])
+            ia, ib = np.meshgrid(self._arm_roots[near], self._obs_roots[task], indexing="ij")
+            self._env_roots = (ia.ravel(), ib.ravel())
+            self._tt_roots = self._arm_roots[near]
+            part_of_root = {ARM_ORDER[self._arm_part[r]]: r for r in self._arm_roots}
+            pairs = [(part_of_root[a], part_of_root[b]) for a, b in RESTRICTED_SELF
+                     if a in part_of_root and b in part_of_root]
+            self._self_roots = (np.array([a for a, _ in pairs], dtype=int),
+                                np.array([b for _, b in pairs], dtype=int))
 
     # --- posing ---
 
@@ -418,6 +444,26 @@ class SoftScene:
                                                     axis=2).max()))
         return reach
 
+    def part_lever_arms(self, q: np.ndarray) -> np.ndarray:
+        """Per ARM_ORDER part and joint, the largest distance of the part's boxes from the
+        joint's axis point [m], (parts, 6): a joint change dq moves no point of part p
+        further than sum_k r[p, k] |dq_k| (0 for joints that do not move the part)."""
+        q = np.asarray(q, dtype=float)
+        frames = link_frames(q)
+        leaves = self._arm_leaves
+        M = np.array([frames[link] for link in self._links])[self.arm.frame[leaves]] \
+            @ self.arm.local[leaves]
+        signs = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)])
+        local = signs[None] * self.arm.half[leaves][:, None]
+        corners = M[:, None, :3, 3] + np.einsum("nij,nkj->nki", M[:, :3, :3], local)
+        part = self._arm_part[leaves]
+        r = np.zeros((len(ARM_ORDER), 6))
+        for p in np.unique(part):
+            pts = corners[part == p].reshape(-1, 3)
+            for k in range(1, min(p, 6) + 1):  # joint k moves link k and everything after it
+                r[p, k - 1] = np.linalg.norm(pts - frames[f"link{k}"][:3, 3], axis=1).max()
+        return r
+
     def lever_arms(self, q: np.ndarray) -> np.ndarray:
         """Per joint, the largest distance of any box it moves from its axis point [m], (6,).
 
@@ -470,7 +516,7 @@ class SoftScene:
     def _turntable_gaps(self, arm: Boxes) -> tuple[np.ndarray, np.ndarray]:
         """Arm nodes vs the turntable (inside both its boxes: at least the larger gap)."""
         out_g, out_i = [], []
-        i = self._arm_roots
+        i = self._tt_roots
         k = len(self._tt_boxes)
         while len(i):
             ii = np.repeat(i, k)
@@ -492,6 +538,8 @@ class SoftScene:
         table = lowest_z(Boxes(arm.c[tb], arm.R[tb], arm.h[tb])) - self.table_z - self.margin
         k = int(np.argmin(table))
         best, pair = float(table[k]), (self.arm.name[tb[k]], "table")
+        part_gaps = np.full(len(ARM_ORDER), np.inf)
+        np.minimum.at(part_gaps, self._arm_part[tb], table)
 
         def env_margin(i, j):
             return np.where(self._arm_is_hoop[i] & self._obs_is_puzzle[j],
@@ -502,15 +550,17 @@ class SoftScene:
         k = int(np.argmin(g))
         if g[k] < best:
             best, pair = float(g[k]), (self.arm.name[i[k]], self.obs.name[j[k]])
+        np.minimum.at(part_gaps, self._arm_part[i], g)
         g, i = self._turntable_gaps(arm)
         k = int(np.argmin(g))
         if g[k] < best:
             best, pair = float(g[k]), (self.arm.name[i[k]], "turntable")
+        np.minimum.at(part_gaps, self._arm_part[i], g)
         g, i, j = self._descend(arm, self.arm, arm, self.arm, *self._self_roots,
                                 lambda i, j: self.self_margin)
         k = int(np.argmin(g))
         return SoftClearance(best, (str(pair[0]), str(pair[1])), float(g[k]),
-                             (str(self.arm.name[i[k]]), str(self.arm.name[j[k]])))
+                             (str(self.arm.name[i[k]]), str(self.arm.name[j[k]])), part_gaps)
 
     def group_distances(self, q: np.ndarray, theta: float) -> dict[str, float]:
         """Distances by obstacle group, all leaf pairs, NO margins: table, cell, task, self."""
