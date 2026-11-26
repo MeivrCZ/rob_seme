@@ -36,6 +36,8 @@ The results land in `Prokop/experiments/`. Commit and push them, then analyse
 them on any computer with `tools/analyze_motion.py` and
 `tools/analyze_survey.py`.
 
+**The checks before the first real attempt (2026-11-27):** [LAB_CHECK_GUIDE.md](LAB_CHECK_GUIDE.md) with `tools/lab_check.py` (dimensions, camera calibration, the executor's timing, perception on the spinning turntable, field of view, a dry run of the solver).
+
 ## Still open
 
 | Check | Why | How |

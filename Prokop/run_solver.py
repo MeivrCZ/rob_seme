@@ -837,6 +837,10 @@ def main() -> None:
             parser.error("--real needs --calibration")
         robot = CRS93()
         robot.initialize(home=False)  # never home from a script
+        # ctu_crs.CRS93 has no camera_delay (the simulator's attribute): the measured
+        # age of an image when grab_image returns (docs/EXPERIMENTS.md E8).
+        from simulation import CAMERA_DELAY
+        robot.camera_delay = CAMERA_DELAY
         if np.abs(robot.get_q() - robot.q_home).max() > np.deg2rad(2):
             parser.error("the robot must stand at q_home (home it by hand first)")
     else:  # the simulator in its own process: only the robot interface for the pipeline

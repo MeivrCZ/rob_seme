@@ -188,6 +188,7 @@ its usage.
 | `tools/fit_soft_boxes.py` | fits the soft collision boxes to the models, writes `models/soft/*_soft.urdf` |
 | `experiments/validate_soft_collision.py` | checks the soft model against the exact meshes |
 | `tools/log_motion.py`, `camera_survey.py` | measurements on the real robot (also run against the sim) |
+| `tools/lab_check.py` | the station checks before a real attempt: dimensions, camera calibration, timing, turntable perception, field of view (`docs/LAB_CHECK_GUIDE.md`) |
 | `tools/analyze_motion.py`, `analyze_survey.py` | analysis of the recorded experiments |
 | `experiments/` | recorded data: `motion_logs/real/`, `camera_survey/<date-time>/` |
 | `docs/` | the documents above, `img/` |
