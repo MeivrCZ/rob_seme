@@ -677,12 +677,64 @@ the task; 3.1 → 2.4 ms per query. The 7 test cases: **the same plans, 320 → 
 54 random moves the same verdicts) but no gain (59 vs 62 samples per move, slower
 overall): the hoop is the closest and the fastest part. Off.
 
+**Batch 5** (20 seeds, the committed `fef62e7`: the faster `solve_at`, the restricted
+pairs): **9 successes**, 9 unreachable at perception, 2 at planning (seeds 5, 12) — the
+same count as batch 4, but faster: planning median 66 → **52 s**, the run's end after
+the start median 102 → **84 s**, latest 117 → **104 s**. Seed 15 now succeeds (83 s),
+seed 5 now fails: 4 of its 6 end angles end with "no way back to a waiting pose"
+after 32–88 s (the deterministic planner exhausted its candidates and roots; the new
+candidate order runs into dead ends the old one avoided), 2 did not return in time.
+
+### 9.12 The ring against the bar in closed form (tried; kept off)
+
+What has a closed form: point – circle (and so point – torus: √((ρ − R)² + z²) minus the
+tube), point – plane / box, sphere – sphere, segment – segment (capsule – capsule); not
+segment – circle or circle – circle (quartic or higher). `SoftScene(analytic_ring=True)`:
+the ring as a torus (centre circle R = 32.4 mm, 3.3 mm below `hoop_center`, tube 4.14 mm
+containing the 5.0 × 6.6 mm cross-section; measured on the hoop mesh, the handle joins at
+64–116° and stays boxes), the bar as a round bar of its half-diagonal (7.07 mm) around
+its centreline (the open end to the pad; median depth in the mesh 5.00 mm), sampled
+every 2 mm: per sample closed form, the distance 1-Lipschitz along the centreline, so a
+strict lower bound = the smallest sample − 1 mm − the radii. The ring's boxes against
+the bar's are skipped; the handle, the foot, the base stay boxes.
+
+`experiments/validate_analytic_ring.py` against the exact meshes (FCL, the ring proper
+against the puzzle; poses touching the foot excluded: the foot box catches them):
+**sound** — 0 bounds above the exact distance in ~3600 poses — but **2.3 mm more
+conservative** (median within 20 mm) and per query only 2.25 → 1.98 ms. On the 7 test
+cases **4 of 7 plan** (boxes: 7 of 7): the ring's free room around the wire is ~23 mm
+minus the 6 mm margins, and 2.3 mm less closes the tight passages in the bend. Kept off
+(`ANALYTIC_RING = False`). A tighter variant (the ring's circle sampled, each point
+against the exact square bar: point – box, in the bend a square swept about its axis)
+would keep only the ring's ~0.8 mm rounding, but a query is not dominated by these
+boxes, so it would mainly match the boxes, not beat their speed.
+
+### 9.13 What a clearance query is dominated by; the compiled separating-axis test
+
+Profile of 1810 queries on near-task poses (the puzzle turned between them, as in a
+move check; 2.88 ms each): the box hierarchy 73 % (arm against the task and the self
+pairs), the turntable 12.5 %, posing the arm's boxes with the link frames only 7.5 %,
+the table 0.9 %. Own time: `box_gaps` 31.5 %, `np.cross` 12.4 % + its axis handling
+8.2 %, reductions 10.5 %: ~7.6 calls per query with ~10 box pairs each — NumPy's
+per-call overhead, not the arithmetic.
+
+* The cross products written out: identical results, 2.88 → 2.67 ms (7 %; stacking
+  the components costs NumPy calls of its own).
+* **`box_gaps` compiled with Numba** (user: a dependency is fine; `uv add numba`,
+  `@njit(cache=True)`, the NumPy version kept as the fallback and the reference):
+  identical to 1.7·10⁻¹⁶ m and the same overlap verdicts on 5000 random pairs; the
+  soft-model tests pass; `validate_restricted_pairs.py` 0 missed; a query **2.39 →
+  0.69 ms (3.5×)** without the profiler. The 7 test cases: **the same plans, 267 →
+  141 s** (320 s before the faster `solve_at`); one end angle 11–35 s.
+
+**Batch 6** (20 seeds, the compiled kernel): **9 successes**, 9 unreachable at perception,
+2 at planning (seeds 5, 12, as in batch 5) — planning median 52 → **35 s**, the run's end
+after the start median 84 → **66 s**, latest 104 → **98 s**.
+
 ## 10. Open ideas (not built yet)
 
-- **The ring against the wire analytically** (planning time, 9.11): a torus against the
-  wire's thick centreline instead of ~40 ring boxes against the puzzle's boxes at every
-  sample of a continuous check (the dominant pair); to be validated against the exact
-  meshes like the boxes.
+- **Compiling more of the planner** (planning time, 9.13): the IK, the continuous checks'
+  stepping and the subdivision are still Python; the query is now 0.69 ms.
 - **Parallel end angles** (planning time): one process per end angle, first plan wins.
 - **Null-space steps** (user): with only the ring centre fixed the arm can
   reconfigure (tilt, tilt direction, roll) while the ring stays put, e.g. to
@@ -721,6 +773,7 @@ All run from the repo root (`uv run python Prokop/experiments/<script>`).
 | `baseline_walk.py [--spacing ...]` | the point-by-point baseline (9.10) |
 | `../tools/build_reachability_map.py` | builds the reachability map (9.10) |
 | `taskspace_path.py [--from-plan]` | task-space small moves between the checkpoints (9.9, dropped) |
+| `validate_analytic_ring.py`, `validate_restricted_pairs.py` | the closed-form ring check and the restricted pairs against the exact meshes (9.11, 9.12) |
 | `optimize_path.py`, `refine_path.py` | the path optimisation experiments (9.8, dropped) |
 | `execution_replay.py RUN/execution.pkl` | a simulated execution offline: tracker frame by frame (re-rendered), stamp lateness, step timing |
 | `profile_breakdown.py RUN.prof` | where a profiled planning run's time goes, by planner block |

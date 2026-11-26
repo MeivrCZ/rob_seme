@@ -73,6 +73,14 @@ RESTRICTED_NEAR_TASK = {ARM_ORDER.index(x) for x in ("link4", "link5", "link6",
 RESTRICTED_SELF = (("hoop", "base_link"), ("hoop", "link4"))  # the latter: near the task
 # with the hoop tilted back the soft boxes of the ring and the forearm touch
 # (experiments/validate_restricted_pairs.py: 4 of 4130 missed without it)
+# analytic_ring=True: the hoop's ring (models/meshes/hoop.stl, hoop_center frame: the ring
+# proper 29.9 .. 34.9 mm from the axis, z -6.6 .. 0; the handle joins at 64 .. 116 deg
+# and stays boxes) as a torus, the bar (10 mm square) as a round bar of its half-diagonal.
+RING_R = 0.0324  # m, the centre circle's radius
+RING_CENTRE_Z = -0.0033  # m, along the ring's axis from hoop_center
+RING_TUBE = float(np.hypot(0.0025, 0.0033))  # m, contains the 5.0 x 6.6 mm cross-section
+BAR_RADIUS = 0.005 * float(np.sqrt(2.0))  # m, contains the square bar
+BAR_STEP = 0.002  # m, the centreline sampled
 
 
 
@@ -149,6 +157,34 @@ def link_frames(q: np.ndarray) -> dict[str, np.ndarray]:
     return frames
 
 
+def bar_centreline(step: float | None = None) -> np.ndarray:
+    """Points of the bar's centreline (puzzle frame) every `step` [m] (default BAR_STEP):
+    the wire from the open end (not the entry stretch in front of it) to the stem's foot
+    (the stem continues below the planner's end point down to the pad)."""
+    from solver.wire import PAD_TOP_Z, segments
+    step = BAR_STEP if step is None else step
+    pts = []
+    for seg in segments(0.0):
+        n = max(1, int(np.ceil(seg.length / step)))
+        pts += [seg.point(k / n) for k in range(n)]
+    last = segments(0.0)[-1].point(1.0)
+    n = max(1, int(np.ceil((last[2] - PAD_TOP_Z) / step)))
+    pts += [np.array([last[0], last[1], last[2] - (last[2] - PAD_TOP_Z) * k / n])
+            for k in range(n + 1)]
+    return np.array(pts)
+
+
+def _ring_frame_in_link(scene) -> tuple[str, np.ndarray]:
+    """The link the hoop moves with and hoop_center in that link's frame."""
+    from ctu_crs import CRS93
+    from solver.hoop_pose import ring_in_flange
+    k = int(np.flatnonzero(scene._arm_is_ring_node)[0])
+    link = scene._links[scene.arm.frame[k]]
+    q0 = np.zeros(6)
+    X = np.linalg.inv(link_frames(q0)[link]) @ CRS93(tty_dev=None).fk(q0) @ ring_in_flange()
+    return link, X
+
+
 @dataclass
 class Boxes:
     """A set of boxes: centres (n, 3), axes (n, 3, 3) as columns, half extents (n, 3)."""
@@ -171,13 +207,29 @@ class Boxes:
 def box_gaps(A: Boxes, B: Boxes, ia: np.ndarray, ib: np.ndarray) -> np.ndarray:
     """Separating-axis lower bounds of the distance of box pairs (A[ia], B[ib]) [m].
 
-    <= 0 exactly when the boxes overlap; otherwise at most their distance.
+    <= 0 exactly when the boxes overlap; otherwise at most their distance. Compiled
+    with Numba when available (box_gaps_numpy otherwise): the query was dominated by
+    NumPy's overhead on these small arrays (~10 pairs per call; 9.13).
     """
+    if _box_gaps_jit is None:
+        return box_gaps_numpy(A, B, ia, ib)
+    return _box_gaps_jit(A.c, A.R, A.h, B.c, B.R, B.h,
+                         np.ascontiguousarray(ia, dtype=np.int64),
+                         np.ascontiguousarray(ib, dtype=np.int64))
+
+
+def box_gaps_numpy(A: Boxes, B: Boxes, ia: np.ndarray, ib: np.ndarray) -> np.ndarray:
+    """box_gaps in NumPy (the reference; the fallback without Numba)."""
     Ra, Rb = A.R[ia], B.R[ib]  # (P, 3, 3), axes as columns
     ha, hb = A.h[ia], B.h[ib]
     d = B.c[ib] - A.c[ia]  # (P, 3)
     at, bt = Ra.transpose(0, 2, 1), Rb.transpose(0, 2, 1)  # axes as rows
-    cross = np.cross(at[:, :, None, :], bt[:, None, :, :]).reshape(-1, 9, 3)
+    # The 9 edge-pair axes, cross products written out: np.cross's axis handling cost
+    # ~20 % of a clearance query on these small arrays (~10 pairs per call; 9.13).
+    a0, a1, a2 = at[:, :, None, 0], at[:, :, None, 1], at[:, :, None, 2]  # (P, 3, 1)
+    b0, b1, b2 = bt[:, None, :, 0], bt[:, None, :, 1], bt[:, None, :, 2]  # (P, 1, 3)
+    cross = np.stack((a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0),
+                     axis=-1).reshape(-1, 9, 3)
     L = np.concatenate([at, bt, cross], axis=1)  # (P, 15, 3)
     norm = np.sqrt((L * L).sum(axis=2))
     valid = norm > 1e-9
@@ -186,6 +238,53 @@ def box_gaps(A: Boxes, B: Boxes, ia: np.ndarray, ib: np.ndarray) -> np.ndarray:
     rb = (np.abs(L @ Rb) * hb[:, None, :]).sum(axis=2)
     gap = np.abs((L @ d[:, :, None])[:, :, 0]) - ra - rb
     return np.where(valid, gap, -np.inf).max(axis=1)
+
+
+def _make_box_gaps_jit():
+    """The separating-axis test compiled (Numba, cached on disk), or None."""
+    try:
+        import numba
+    except ImportError:
+        return None
+
+    @numba.njit(cache=True)
+    def kernel(Ac, AR, Ah, Bc, BR, Bh, ia, ib):
+        out = np.empty(len(ia))
+        L = np.empty((15, 3))
+        for p in range(len(ia)):
+            a, b = ia[p], ib[p]
+            dx, dy, dz = Bc[b, 0] - Ac[a, 0], Bc[b, 1] - Ac[a, 1], Bc[b, 2] - Ac[a, 2]
+            for k in range(3):  # the 3 + 3 face axes (columns of the rotations)
+                for m in range(3):
+                    L[k, m] = AR[a, m, k]
+                    L[3 + k, m] = BR[b, m, k]
+            for i in range(3):  # the 9 edge-pair axes
+                for j in range(3):
+                    r = 6 + 3 * i + j
+                    L[r, 0] = AR[a, 1, i] * BR[b, 2, j] - AR[a, 2, i] * BR[b, 1, j]
+                    L[r, 1] = AR[a, 2, i] * BR[b, 0, j] - AR[a, 0, i] * BR[b, 2, j]
+                    L[r, 2] = AR[a, 0, i] * BR[b, 1, j] - AR[a, 1, i] * BR[b, 0, j]
+            best = -np.inf
+            for r in range(15):
+                n = np.sqrt(L[r, 0] ** 2 + L[r, 1] ** 2 + L[r, 2] ** 2)
+                if n <= 1e-9:
+                    continue  # parallel edges: no axis
+                lx, ly, lz = L[r, 0] / n, L[r, 1] / n, L[r, 2] / n
+                ra = 0.0
+                rb = 0.0
+                for k in range(3):
+                    ra += abs(lx * AR[a, 0, k] + ly * AR[a, 1, k] + lz * AR[a, 2, k]) * Ah[a, k]
+                    rb += abs(lx * BR[b, 0, k] + ly * BR[b, 1, k] + lz * BR[b, 2, k]) * Bh[b, k]
+                g = abs(lx * dx + ly * dy + lz * dz) - ra - rb
+                if g > best:
+                    best = g
+            out[p] = best
+        return out
+
+    return kernel
+
+
+_box_gaps_jit = _make_box_gaps_jit()
 
 
 def lowest_z(A: Boxes) -> np.ndarray:
@@ -272,7 +371,8 @@ class SoftScene:
 
     def __init__(self, model: TurntableModel, margin: float = MARGIN,
                  hoop_puzzle_margin: float = HOOP_PUZZLE_MARGIN,
-                 self_margin: float = SELF_MARGIN, restricted: bool = False) -> None:
+                 self_margin: float = SELF_MARGIN, restricted: bool = False,
+                 analytic_ring: bool = False) -> None:
         data = _data()
         self.model = model
         self.table_z = data["table_z"]
@@ -325,6 +425,18 @@ class SoftScene:
         obs.freeze()
         self._obs_roots = np.array(roots)
         self._obs_is_puzzle = np.array(obs.tag) == "puzzle"
+        # analytic_ring: the ring against the bar (the wire's square bar) computed in closed
+        # form per centreline point (point - circle), not with the ring's and the bar's
+        # boxes; the handle, the foot and the base stay boxes (see ring_bar_distance).
+        self.analytic_ring = analytic_ring
+        arm_names = [str(x) for x in self.arm.name]
+        self._arm_is_ring_node = np.array([nm.startswith("hoop_ring") for nm in arm_names])
+        obs_names = [str(x) for x in obs.name]
+        self._obs_is_bar_node = np.array([nm.startswith("puzzle") and nm not in
+                                          ("puzzle", "puzzle_foot") for nm in obs_names])
+        if analytic_ring:
+            self._bar_local = bar_centreline()
+            self._ring_link, self._ring_X = _ring_frame_in_link(self)
         self._turntable = data["turntable"]
         self._T_top_inv = np.linalg.inv(_fixed_frames()["T_top"])
         self._theta: float | None = None
@@ -444,6 +556,24 @@ class SoftScene:
                                                     axis=2).max()))
         return reach
 
+    def ring_bar_distance(self, q: np.ndarray, theta: float) -> float:
+        """A lower bound of the distance between the hoop's ring and the puzzle's bar [m]
+        (no margin): the ring as a torus (centre circle RING_R, tube RING_TUBE), the bar
+        as a round bar of radius BAR_RADIUS around its centreline, sampled every
+        BAR_STEP. Per sample the distance to the ring's centre circle is closed form
+        (sqrt((rho - R)^2 + z^2)); it is 1-Lipschitz along the centreline, so the true
+        minimum is at least the sampled one minus BAR_STEP / 2."""
+        W = link_frames(np.asarray(q, float))[self._ring_link] @ self._ring_X
+        n = W[:3, 2]
+        c = W[:3, 3] + RING_CENTRE_Z * n
+        P = self.model.puzzle_T(theta)
+        pts = self._bar_local @ P[:3, :3].T + P[:3, 3]
+        d = pts - c
+        z = d @ n
+        rho = np.linalg.norm(d - np.outer(z, n), axis=1)
+        to_circle = np.sqrt((rho - RING_R) ** 2 + z * z)
+        return float(to_circle.min() - BAR_STEP / 2 - BAR_RADIUS - RING_TUBE)
+
     def part_lever_arms(self, q: np.ndarray) -> np.ndarray:
         """Per ARM_ORDER part and joint, the largest distance of the part's boxes from the
         joint's axis point [m], (parts, 6): a joint change dq moves no point of part p
@@ -491,14 +621,21 @@ class SoftScene:
 
     @staticmethod
     def _descend(A: Boxes, ta: _Tree, B: Boxes, tb: _Tree, i: np.ndarray, j: np.ndarray,
-                 margin) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                 margin, skip=None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Gaps (margin subtracted) of node pairs, refining those closer than REFINE.
+
+        skip(i, j): pairs to leave out (the ring against the bar with analytic_ring).
 
         Returns:
             The final gaps and their node pairs (leaves, or nodes left unrefined).
         """
-        out_g, out_i, out_j = [], [], []
+        out_g, out_i, out_j = [np.zeros(0)], [np.zeros(0, int)], [np.zeros(0, int)]
         while len(i):
+            if skip is not None:
+                keep = ~skip(i, j)
+                i, j = i[keep], j[keep]
+                if not len(i):
+                    break
             g = box_gaps(A, B, i, j) - margin(i, j)
             split = (g < REFINE) & (ta.internal[i] | tb.internal[j])
             out_g.append(g[~split]), out_i.append(i[~split]), out_j.append(j[~split])
@@ -545,12 +682,23 @@ class SoftScene:
             return np.where(self._arm_is_hoop[i] & self._obs_is_puzzle[j],
                             self.hoop_puzzle_margin, self.margin)
 
+        skip = None
+        if self.analytic_ring:
+            def skip(i, j):
+                return self._arm_is_ring_node[i] & self._obs_is_bar_node[j]
         g, i, j = self._descend(arm, self.arm, self._obs_boxes, self.obs, *self._env_roots,
-                                env_margin)
-        k = int(np.argmin(g))
-        if g[k] < best:
-            best, pair = float(g[k]), (self.arm.name[i[k]], self.obs.name[j[k]])
-        np.minimum.at(part_gaps, self._arm_part[i], g)
+                                env_margin, skip)
+        if len(g):
+            k = int(np.argmin(g))
+            if g[k] < best:
+                best, pair = float(g[k]), (self.arm.name[i[k]], self.obs.name[j[k]])
+            np.minimum.at(part_gaps, self._arm_part[i], g)
+        if self.analytic_ring:
+            d = self.ring_bar_distance(q, theta) - self.hoop_puzzle_margin
+            if d < best:
+                best, pair = float(d), ("hoop_ring", "puzzle_bar")
+            hoop = ARM_ORDER.index("hoop")
+            part_gaps[hoop] = min(part_gaps[hoop], d)
         g, i = self._turntable_gaps(arm)
         k = int(np.argmin(g))
         if g[k] < best:

@@ -81,6 +81,7 @@ from solver.wire import (SEGMENT_NAMES, SUCCESS_HEIGHT, checkpoint_arclengths,
 SLACK = 1.15  # safety factor on the motion bound (the lever arms change during a step)
 MAX_JOINT_STEP = np.deg2rad(5.0)  # rad, largest joint change between two samples
 MIN_ALLOW = 0.0005  # m, a clearance below this counts as too close (steps would vanish)
+ANALYTIC_RING = False  # the ring against the bar in closed form (soft_collision; 9.12)
 PER_PART_STEP = False  # each part's gap at its own speed (see _step): sound, but no gain (the hoop is the closest and the fastest part; 9.11)
 ENTRIES = (0.015, 0.03, 0.05, 0.08)  # m, entry distances tried before the open end
 PASS_LOG: Callable[[str], None] | None = None  # set to print a line per timing pass
@@ -1458,7 +1459,7 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
     """
     from solver import rrt as rrt_mod
     t_wall = time.monotonic()
-    scene = scene or SoftScene(model, restricted=True)
+    scene = scene or SoftScene(model, restricted=True, analytic_ring=ANALYTIC_RING)
     q_lo, q_hi = kin.q_min + joint_margin, kin.q_max - joint_margin
 
     def in_room(q) -> bool:
@@ -2017,8 +2018,9 @@ def _margin_scene(model, margins) -> SoftScene:
     # restricted: only the pairs that can touch (validated: experiments/
     # validate_restricted_pairs.py, 0 missed collisions in 4130 poses near the task)
     if margins is None:
-        return SoftScene(model, restricted=True)
-    return SoftScene(model, hoop_puzzle_margin=margins.hoop_puzzle, restricted=True)
+        return SoftScene(model, restricted=True, analytic_ring=ANALYTIC_RING)
+    return SoftScene(model, hoop_puzzle_margin=margins.hoop_puzzle, restricted=True,
+                     analytic_ring=ANALYTIC_RING)
 
 
 def _backward_job(job):
