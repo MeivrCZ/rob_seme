@@ -469,51 +469,213 @@ PRE_ENTRY_DIRECTIONS = ("back", "up", "back and up")
 PRE_ENTRY_DISTANCES = (0.05, 0.10, 0.15)  # m
 
 
+# --- The approach: rings for the turning task (user design, 2026-11-26) ---
+#
+# The approach (q_home -> the waiting pose at checkpoint 0) must stay clear of the
+# task whatever its angle. The cell walls and the camera bar are out of reach in any
+# configuration and the move from q_home to the task does not come near the table, so
+# only the task counts: each of its parts (turntable, base with the puzzle's foot,
+# stem, vertical run + jog,
+# bend, top bar) sweeps a ring about the turntable axis in a full turn, with an inner
+# and an outer radius and a height range. A ring does not depend on the angle, and
+# the distance of an arm box from it is a few vectorised numbers (the old check took
+# the full soft model plus every task box swept, 20-30 s for an approach). Checkpoint
+# 0 can lie inside a ring (e.g. the top bar's), so the approach is home -> a
+# pre-pre-entry pose outside the rings (checked against the rings) -> checkpoint 0 (a
+# few cm, checked with the full swept volume as before). The arm against itself is
+# checked every APPROACH_SELF_STEP.
+
+APPROACH_RING_GROUPS = (
+    ("turntable", ()), ("base", ("base", "puzzle_foot")),  # the foot sits in the base
+    ("stem", ("puzzle_stem",)),
+    ("vertical run and jog", ("puzzle_vertical_run", "puzzle_jog")),
+    ("bend", ("puzzle_bend",)), ("top bar", ("puzzle_top_bar",)))
+PRE_PRE_DIRECTIONS = ("toward the robot", "outward", "up", "outward and up", "back",
+                      "back and up", "toward the robot and up")
+APPROACH_MIN_GAP = 0.003  # m, the approach need not squeeze: a smaller ring gap is blocked
+APPROACH_LAST_MAX = np.deg2rad(40.0)  # rad, longest last move (pre-pre-entry -> waiting pose)
+# The pre-pre-entry pose fixes only the ring's position (a via point): orientations
+# around the waiting pose's own, roll about the ring axis x tilt about two horizontals.
+PRE_PRE_ROLLS = np.deg2rad(np.arange(0.0, 360.0, 30.0))
+PRE_PRE_TILTS = np.deg2rad([-25.0, 0.0, 25.0])
+PRE_PRE_DISTANCES = (0.05, 0.10, 0.15)  # m
+APPROACH_SELF_STEP = np.deg2rad(5.0)  # rad, self-collision samples along an approach move
+_SIGNS = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)])
+
+
+def _corners(boxes) -> np.ndarray:
+    """(n, 8, 3) corners of soft boxes."""
+    return boxes.c[:, None] + np.einsum("nij,nkj->nki", boxes.R, _SIGNS[None] * boxes.h[:, None])
+
+
+class ApproachRings:
+    """The rings the task's parts sweep about the turntable axis (see above)."""
+
+    def __init__(self, scene: SoftScene) -> None:
+        self.scene = scene
+        axis = np.asarray(scene.model.axis_xy, float)
+        self.axis = axis
+        obs = scene.obstacle_boxes(0.0)
+        n = len(scene._obs_leaves)
+        names = [str(x) for x in scene.obs.name[:n]]
+        corners_obs = _corners(type(obs)(obs.c[:n], obs.R[:n], obs.h[:n]))
+        corners_tt = _corners(scene._tt_boxes)
+        self.names, rows = [], []
+        for name, prefixes in APPROACH_RING_GROUPS:
+            if not prefixes:
+                cs = corners_tt
+            else:
+                idx = [k for k, nm in enumerate(names) if nm.startswith(prefixes)]
+                cs = corners_obs[idx]
+            r = np.linalg.norm(cs[..., :2] - axis, axis=2)  # (boxes, 8)
+            centre = cs.mean(axis=1)[:, :2]
+            rho = np.linalg.norm(cs[..., :2] - centre[:, None], axis=2).max(axis=1)
+            r_in = max(0.0, float((np.linalg.norm(centre - axis, axis=1) - rho).min()))
+            rows.append((r_in, float(r.max()), float(cs[..., 2].min()), float(cs[..., 2].max())))
+            self.names.append(name)
+        self.r_in, self.r_out, self.z0, self.z1 = (np.array(c) for c in zip(*rows))
+        self.leaves = scene._arm_leaves
+        self.margin = scene.margin
+
+    def clearance(self, q: np.ndarray) -> tuple[float, str]:
+        """Least gap [m] (margin subtracted, a lower bound) of the arm to the rings and
+        the ring; <= 0: too close."""
+        arm = self.scene.arm_boxes(q)
+        sub = type(arm)(arm.c[self.leaves], arm.R[self.leaves], arm.h[self.leaves])
+        cs = _corners(sub)  # (n, 8, 3)
+        centre = sub.c[:, :2]
+        rho = np.linalg.norm(cs[..., :2] - centre[:, None], axis=2).max(axis=1)
+        dc = np.linalg.norm(centre - self.axis, axis=1)
+        d_lo = np.maximum(0.0, dc - rho)[:, None]  # nearest a box can come to the axis
+        d_hi = np.linalg.norm(cs[..., :2] - self.axis, axis=2).max(axis=1)[:, None]
+        z_lo, z_hi = cs[..., 2].min(axis=1)[:, None], cs[..., 2].max(axis=1)[:, None]
+        radial = np.maximum(self.r_in[None] - d_hi, d_lo - self.r_out[None])
+        vertical = np.maximum(self.z0[None] - z_hi, z_lo - self.z1[None])
+        gaps = np.maximum(radial, vertical) - self.margin  # (boxes, rings)
+        a, b = np.unravel_index(int(np.argmin(gaps)), gaps.shape)
+        return float(gaps[a, b]), self.names[b]
+
+    def move_free(self, a: np.ndarray, b: np.ndarray) -> tuple[bool, float]:
+        """Whether the straight joint move a -> b stays clear of the rings (continuous:
+        the next sample is no further than the gap allows), and its least gap."""
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        dq = np.abs(b - a)
+        u, least = 0.0, np.inf
+        while True:
+            q = a + min(u, 1.0) * (b - a)
+            gap, _ = self.clearance(q)
+            least = min(least, gap)
+            if gap <= APPROACH_MIN_GAP:
+                return False, least
+            if u >= 1.0:
+                return True, least
+            reach = float(self.scene.lever_arms(q) @ dq)  # metres per unit of u
+            u += gap / (SLACK * max(reach, 1e-9))
+
+    def self_free(self, a: np.ndarray, b: np.ndarray, theta: float = 0.0) -> bool:
+        """The arm against itself along a -> b, every APPROACH_SELF_STEP."""
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        n = max(1, int(np.ceil(np.abs(b - a).max() / APPROACH_SELF_STEP)))
+        return all(self.scene.clearance(a + (b - a) * (k / n), theta).self_gap > 0
+                   for k in range(n + 1))
+
+
 def plan_approach(kin, scene: SoftScene, model: TurntableModel, theta: float, timing,
                   q_from: np.ndarray, q0: np.ndarray, entry: float
                   ) -> tuple[list[np.ndarray] | None, str]:
-    """Moves from q_from to checkpoint 0's configuration q0, clear of the swept volume.
+    """Moves from q_from to checkpoint 0's configuration q0, clear of the turning task
+    (see above: rings for the long move, the full swept volume for the last few cm).
 
-    The puzzle may be anywhere while the robot approaches, so every move is
-    checked continuously against the scene AND the volume the task sweeps in a
-    full turn (check_moves with swept=True). Tried in order: one direct joint
-    move; then two moves through a pre-entry pose: the ring as at checkpoint 0,
-    moved back along the wire, up, or back and up (PRE_ENTRY_DISTANCES), with
-    the IK solution closest to q0 (itself a waiting pose: waits_free).
+    Tried in order: one direct joint move (against the rings); then through a
+    pre-pre-entry pose: the ring as at checkpoint 0 moved outward from the turntable
+    axis, up, outward and up, back along the wire, or back and up (PRE_PRE_DISTANCES),
+    the IK solution closest to q0, outside the rings; home -> it checked against the
+    rings, it -> q0 against the full swept volume.
 
     Returns:
         The configurations from q_from to q0 (None if nothing works) and how.
     """
-    def free(qs: list[np.ndarray]) -> float | None:
+    rings = getattr(scene, "_approach_rings", None)
+    if rings is None:
+        rings = scene._approach_rings = ApproachRings(scene)
+
+    def swept_free(qs: list[np.ndarray]) -> float | None:
         """Least clearance of the moves through qs (scene and swept volume), None if any hits."""
         checks = check_moves(scene, lambda t: theta, 0.0, timing, np.array(qs),
                              np.zeros(len(qs), int), swept=True)[0]
         return None if any(c.hits for c in checks) else min(c.clearance for c in checks)
 
     q_from, q0 = np.asarray(q_from, float), np.asarray(q0, float)
-    least = free([q_from, q0])
-    if least is not None:
-        return [q_from, q0], f"one direct joint move, soft clearance {1000 * least:.1f} mm"
+    ok, least = rings.move_free(q_from, q0)
+    if ok and rings.self_free(q_from, q0, theta):
+        return [q_from, q0], f"one direct joint move, ring gap {1000 * least:.1f} mm"
     ring = kin.fk(q0) @ ring_in_flange()
+    p = ring[:3, 3]
+    outward = np.append(p[:2] - rings.axis, 0.0)
+    outward = outward / np.linalg.norm(outward) if np.linalg.norm(outward) > 1e-6 else None
     back = -model.checkpoint_T(wire_path(0, entry), 0, theta)[:3, 2]  # against the travel
     up = np.array([0.0, 0.0, 1.0])
-    directions = {"back": back, "up": up, "back and up": back + up}
-    for name in PRE_ENTRY_DIRECTIONS:
+    directions = {"up": up, "back": back, "back and up": back + up}
+    if outward is not None:
+        directions.update({"outward": outward, "outward and up": outward + up})
+    to_robot = np.append(-p[:2], 0.0)
+    if np.linalg.norm(to_robot) > 1e-6:
+        to_robot /= np.linalg.norm(to_robot)
+        directions.update({"toward the robot": to_robot, "toward the robot and up": to_robot + up})
+    flange_of_ring = np.linalg.inv(ring_in_flange())
+
+    def rot(axis, a):
+        c, s_ = np.cos(a), np.sin(a)
+        x, y, z = axis
+        return np.array([[c + x * x * (1 - c), x * y * (1 - c) - z * s_, x * z * (1 - c) + y * s_],
+                         [y * x * (1 - c) + z * s_, c + y * y * (1 - c), y * z * (1 - c) - x * s_],
+                         [z * x * (1 - c) - y * s_, z * y * (1 - c) + x * s_, c + z * z * (1 - c)]])
+
+    def ik_position(position):
+        """In-limits IK closest to q0 putting the ring centre at position, the ring's
+        orientation free around the waiting pose's (see PRE_PRE_ROLLS / _TILTS)."""
+        best, best_d = None, np.inf
+        R0 = ring[:3, :3]
+        for ta in PRE_PRE_TILTS:
+            for tb in PRE_PRE_TILTS:
+                Rt = rot((1.0, 0.0, 0.0), ta) @ rot((0.0, 1.0, 0.0), tb)
+                for roll in PRE_PRE_ROLLS:
+                    T = np.eye(4)
+                    T[:3, :3] = Rt @ R0 @ rot((0.0, 0.0, 1.0), roll)
+                    T[:3, 3] = position
+                    for q in kin.ik(T @ flange_of_ring):
+                        if kin.in_limits(q):
+                            d = float(np.abs(q - q0).max())
+                            if d < best_d:
+                                best, best_d = q, d
+        return best
+
+    # All candidates first, then the cheap checks, then the full check of the last move
+    # in order of its length in joint space (a pose with a turned hoop can be far from
+    # the waiting pose: its "last few cm" are then a long, slow, usually failing check).
+    candidates = []
+    for name in PRE_PRE_DIRECTIONS:
+        if name not in directions:
+            continue
         direction = directions[name] / np.linalg.norm(directions[name])
-        for distance in PRE_ENTRY_DISTANCES:
-            target = ring.copy()
-            target[:3, 3] += distance * direction
-            sols = [q for q in kin.ik(target @ np.linalg.inv(ring_in_flange()))
-                    if kin.in_limits(q)]
-            if not sols:
+        for distance in PRE_PRE_DISTANCES:
+            q_pre = ik_position(p + distance * direction)
+            if q_pre is None or np.abs(q_pre - q0).max() > APPROACH_LAST_MAX:
                 continue
-            q_pre = min(sols, key=lambda q: np.linalg.norm(q - q0))
-            least = free([q_from, q_pre, q0])
-            if least is not None:
-                return ([q_from, q_pre, q0], f"through a pre-entry pose {100 * distance:.0f} cm "
-                        f"{name}, soft clearance {1000 * least:.1f} mm")
-    return None, ("no direct move or pre-entry pose (back / up / back and up, 5-15 cm) "
-                  "clears the scene and the swept volume")
+            if rings.clearance(q_pre)[0] <= APPROACH_MIN_GAP:
+                continue  # not outside the rings
+            candidates.append((float(np.abs(q_pre - q0).max()), name, distance, q_pre))
+    for _, name, distance, q_pre in sorted(candidates, key=lambda c: c[0]):
+        ok, least = rings.move_free(q_from, q_pre)
+        if not ok or not rings.self_free(q_from, q_pre, theta):
+            continue
+        last = swept_free([q_pre, q0])  # the last move: the full check
+        if last is not None:
+            return ([q_from, q_pre, q0], f"through a pre-pre-entry pose {100 * distance:.0f}"
+                    f" cm {name}: ring gap {1000 * least:.1f} mm, then {1000 * last:.1f} mm "
+                    f"soft clearance into the waiting pose")
+    return None, ("no direct move or pre-pre-entry pose (toward the robot / outward / up / "
+                  "back, 5-15 cm) clears the task's rings")
 
 
 # --- The spinning puzzle: when to start ---
@@ -555,26 +717,67 @@ def start_angles(model: TurntableModel, traversal: float = TRAVERSAL_GUESS,
 
 def plan_spinning(kin, timing, model: TurntableModel, candidates: list[float] | None = None,
                   bend_points: int = 3, q_start: np.ndarray | None = None,
-                  progress: Callable[[float, TierResult], None] | None = None
+                  progress: Callable[[float, TierResult], None] | None = None,
+                  workers: int | None = None, approach_from: np.ndarray | None = None,
+                  deadline: float | None = None,
+                  rank: Callable[[float, TierResult], tuple] | None = None,
+                  margins=None,
+                  accept: Callable[[float, TierResult], bool] | None = None,
+                  window: Callable[[float, TierResult], float] | None = None
                   ) -> tuple[float | None, TierResult | None]:
     """Plans the traversal of a spinning puzzle at its start angle.
 
     Args:
         model: The (fitted) turntable model; its omega and direction are used.
-        candidates: Start angles to try in order (default: only the first of
-            start_angles(model), the puzzle facing the robot half way through).
+        candidates: Spinning: END angles to try in order (default end_angles(model):
+            plan_backward, the start angle follows). Static: start angles (default
+            the first of start_angles(model)).
         bend_points: Checkpoints on the bend (plan_rrt: RRT between checkpoints).
         progress: Called with (start angle, the last tier's result) per candidate.
+        workers: Spinning: end angles planned at the same time, one process each
+            (the first collision-free plan wins; 1 = one after another; default
+            BW_WORKERS).
+        approach_from: Spinning: if given (e.g. q_home), a plan counts only if
+            plan_approach also finds the approach from there to its waiting pose
+            (result.approach, result.approach_how); else the next end angle.
+        deadline: Spinning, parallel: time [s, time.monotonic()] by which the
+            choice is made (the workers are stopped then); also clamps the
+            BW_SCORE_WINDOW after the first usable plan.
+        accept: Spinning, parallel: whether a usable plan counts (e.g. it ends in
+            time); one that does not is ignored.
+        window: Spinning, parallel: how long [s] to wait for other plans after the
+            first accepted one (default BW_SCORE_WINDOW), clamped by deadline.
+        margins: solver.uncertainty.Margins (the hoop-puzzle and joint-limit
+            margins from the run's uncertainties); default the fixed ones.
+        rank: Spinning, parallel: sort key (largest best) of (start angle, result)
+            for choosing between the usable plans; default _plan_rank (distance
+            from the joint limits and singularities).
 
     Returns:
         The start angle and the collision-free result, or (None, None).
     """
-    scene = SoftScene(model)
+    scene = _margin_scene(model, margins)
+    joint_margin = margins.joint_limit if margins is not None else 0.0
+    if model.omega:  # backwards in time from the end angles; the start angle falls out
+        angles = end_angles(model) if candidates is None else list(candidates)
+        workers = BW_WORKERS if workers is None else workers
+        if workers > 1:
+            return _plan_backward_parallel(timing, model, angles, bend_points, workers,
+                                           progress, approach_from, deadline, rank, margins,
+                                           accept, window)
+        for theta_end in angles:
+            theta, result = plan_backward(kin, timing, model, theta_end,
+                                          bend_points=bend_points, scene=scene,
+                                          joint_margin=joint_margin)
+            _with_approach(kin, timing, model, theta, result, approach_from, scene)
+            if progress is not None:
+                progress(theta_end, result)
+            if _usable(theta, result, approach_from):
+                return theta, result
+        return None, None
     for theta in (start_angles(model, count=1) if candidates is None else candidates):
-        result = (plan_spacetime(kin, timing, model, theta, bend_points=bend_points,
-                                 scene=scene, q_start=q_start) if model.omega
-                  else plan_rrt(kin, timing, model, theta, bend_points=bend_points, scene=scene,
-                                q_start=q_start))
+        result = plan_rrt(kin, timing, model, theta, bend_points=bend_points, scene=scene,
+                          q_start=q_start)
         if progress is not None:
             progress(theta, result)
         if result.collision_free:
@@ -823,7 +1026,7 @@ def _plan_rrt_face(kin, timing, model, theta_start, bend_points, scene, orientat
 
 ST_STEP = np.deg2rad(25.0)  # rad, largest joint change of one extension
 ST_MAX_MOVE = 1.2  # s, longest move (the puzzle turns ~15 deg meanwhile)
-ST_GOAL_BIAS = 0.2
+ST_GOAL_BIAS = 0.5
 ST_BOX = np.deg2rad(40.0)  # rad, sampling box beyond the node and the goal
 ST_MAX_NODES = 600  # per checkpoint
 ST_TIME_LIMIT = 6.0  # s, per tree search (one orientation at one checkpoint)
@@ -833,7 +1036,7 @@ ST_RETRY_ORIENTATIONS = 3  # orientations tried when searching a checkpoint agai
 ST_DIFFERENT = (0.3, np.deg2rad(10.0))  # s, rad: an arrival this different is a new one
 ST_ALTERNATIVES = 5  # other ring orientations tried at a checkpoint that cannot be reached
 ST_MAX_GOAL_JUMP = np.deg2rad(60.0)  # rad, a goal further from the node is another branch
-ST_WIRE_SHARE = 0.6  # share of the extensions guided along the wire (after the goal bias)
+ST_WIRE_SHARE = 0.4  # share of the extensions guided along the wire (after the goal bias)
 ST_WIRE_NOISE = np.deg2rad(0.5)  # rad, noise on a guided target (none at the checkpoint)
 ST_AIM_CHECKPOINT = 0.3  # share of the guided extensions aimed at the checkpoint itself
 ST_AT_CHECKPOINT = 0.005  # m, a free node with the ring centre this close has reached it
@@ -1120,3 +1323,484 @@ def plan_spacetime(kin, timing, model: TurntableModel, theta_start: float,
     result.seconds = time.monotonic() - t_wall
     return result
 
+
+
+# --- The spinning puzzle backwards in time (user design, 2026-11-25) ---
+#
+# The robot can wait only at the start (checkpoint 0), so the free end of the
+# problem is the start, and the hard part (the end of the bend, the vertical
+# run, the stem: the turning top bar meets the forearm there) is at the end.
+# So the tree grows BACKWARDS in time: the root is the ring in the stem at
+# t = 0 with the puzzle at an end angle chosen so the top bar is out of the
+# arm's way; a new node is EARLIER than its parent by the move's duration (the
+# move new -> parent is checked in forward time against the turning puzzle);
+# the checkpoints are subgoals in reverse, down to checkpoint 0, which must be
+# a waiting pose (clear of the swept volume). The puzzle's angle there IS the
+# start angle (the robot waits for it). Moves are time-symmetric, so the same
+# timing model and checks apply. Otherwise as plan_spacetime: wire-guided
+# sampling (walking back along the wire), position-only checkpoints with free
+# roll, moves <= ST_MAX_MOVE, backtracking.
+
+BW_END_ANGLES = 6  # end angles tried (the top bar away from the robot first, 30 deg apart)
+BW_ROOTS = 3  # final configurations tried per end angle
+BW_TOTAL_LIMIT = 120.0  # s, per end angle
+BW_TILT = np.deg2rad(20.0)  # rad, the default ring tilt at a checkpoint (any roll)
+BW_END_CHECKED = 40  # final configurations (most clearance first) checked for waiting at the end
+BW_END_STEP = np.deg2rad(5.0)  # rad, angle step of that check (a full turn)
+
+
+def end_angles(model: TurntableModel, count: int = BW_END_ANGLES,
+               step: float = START_STEP) -> list[float]:
+    """End angles to try: the top bar pointing away from the robot first, then alternately
+    later and earlier ones, `step` apart."""
+    away = facing_angle(model) + np.pi
+    out = [away] + [away + (k + 1) // 2 * step * (1 if k % 2 else -1) for k in range(1, count)]
+    return [float(np.arctan2(np.sin(a), np.cos(a))) for a in out]
+
+
+def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
+                  bend_points: int = 3, scene: SoftScene | None = None, face: int = -1,
+                  seed: int = 0, joint_margin: float = 0.0) -> tuple[float | None, TierResult]:
+    """Plans the spinning traversal backwards in time from the end angle (see above).
+
+    Returns:
+        The start angle (the puzzle's angle when the robot leaves checkpoint 0) and the
+        result (qs, arrivals from t = 0 at checkpoint 0, plan); (None, result) if none.
+
+    joint_margin: every configuration keeps this from the joint limits [rad]
+    (solver.uncertainty: room for the executor's corrections). The IK filters and
+    the sampling box are the limits shrunk by it; a box is convex, so every step
+    between nodes stays inside too.
+    """
+    from solver import rrt as rrt_mod
+    t_wall = time.monotonic()
+    scene = scene or SoftScene(model)
+    q_lo, q_hi = kin.q_min + joint_margin, kin.q_max - joint_margin
+
+    def in_room(q) -> bool:
+        return bool(np.all(q >= q_lo) and np.all(q <= q_hi))
+    rng = np.random.default_rng(seed)
+    grid = orientation_grid()
+    to_ring = ring_in_flange()
+    rolls = np.arange(-np.pi, np.pi, ROLL_STEP)
+
+    def angle(t: float) -> float:  # t <= 0, the end at t = 0
+        return theta_end + model.direction * model.omega * t
+
+    def duration(a, b):
+        return timing.move_duration(a, b)
+
+    def config_free(q, t):
+        return scene.clearance(q, angle(t)).free
+
+    def move_free(a, b, t):  # a -> b starting at t (forward in time)
+        check = check_moves(scene, lambda s: angle(t + s), model.omega, timing,
+                            np.array([a, b]), np.array([-1, 0]))[0][0]
+        return not check.hits
+
+    # The wire laid out from the LARGEST entry: checkpoint 0 may be any of the entry
+    # distances (the ring leaves the bar back along the straight top-bar axis; the
+    # start angle, which decides where a pose can wait, is known only at the end).
+    for entry in (max(ENTRIES),):
+        stops = [(e, entry - e) for e in sorted(ENTRIES)]  # (entry, arclength), nearest first
+        path = wire_path(0, entry, bend_points)
+        n = len(path.frames)
+        arclength = checkpoint_arclengths(0, entry, bend_points)
+        result = TierResult(tier=0, checkpoints=n, feasible=False, face=face)
+        result.entry = entry
+
+        def ik_any_roll(frame, orient, q_near):
+            _, tilt, direction = (float(x) for x in orient)
+            sols = [x for roll in rolls
+                    for x in kin.ik(flange_target(frame, float(roll), face, tilt, direction))
+                    if in_room(x)]
+            if not sols:
+                return None
+            q = min(sols, key=lambda x: float(np.abs(x - q_near).max()))
+            return q if np.abs(q - q_near).max() <= ST_MAX_GOAL_JUMP else None
+
+        def before(frame_at, orient, q_near, t_near):
+            """Configuration on frame_at(t) at the time t the robot would leave it to reach
+            (q_near, t_near): t = t_near - duration (solved by iteration)."""
+            q = q_near
+            for _ in range(3):
+                t = t_near - duration(q, q_near)
+                q = ik_any_roll(frame_at(t), orient, q_near)
+                if q is None:
+                    return None, None
+            return q, t_near - duration(q, q_near)
+
+        def waiting_entry(q, t):
+            """The entry distance whose checkpoint 0 the ring is on, if q can wait there
+            (clear of the swept volume); else None."""
+            ring = kin.fk(q) @ to_ring
+            P = model.puzzle_T(angle(t))
+            for e, s0 in stops:
+                if np.linalg.norm(ring[:3, 3] - (P @ wire_frame_at(s0, entry))[:3, 3]) \
+                        <= ST_AT_CHECKPOINT:
+                    return e if waits_free(scene, q, angle(t)) else None
+            return None
+
+        def at_checkpoint(k, q, t):
+            if k == 0:
+                return waiting_entry(q, t) is not None
+            ring = kin.fk(q) @ to_ring
+            P = model.puzzle_T(angle(t))
+            return np.linalg.norm(ring[:3, 3] - (P @ path.frames[k])[:3, 3]) <= ST_AT_CHECKPOINT
+
+        def orient_for(tilt):
+            same = grid[np.isclose(grid[:, 1], tilt)]
+            return same[0]  # roll is free; the tilt direction of the grid's first entry
+
+        tilts = sorted(set(np.round(grid[:, 1], 9)), key=lambda a: abs(a - BW_TILT))
+        orientations = [orient_for(tilt) for tilt in tilts][:ST_ALTERNATIVES + 1]
+
+        def reach(k, orient, q_from, t_from, orient_from):
+            """Tree backwards from (q_from, t_from) at checkpoint k + 1 to checkpoint k;
+            the path [(q, t), ...] in forward order, or None."""
+            deadline = time.monotonic() + ST_TIME_LIMIT
+            nodes, times, parents = [q_from], [t_from], [-1]
+            progress = [arclength[k + 1]]  # how far along the wire (decreasing)
+            span = arclength[k + 1] - arclength[k]
+
+            def chain_from(i):  # forward order: node i, its parent, ..., the root
+                out = [i]
+                while parents[out[-1]] >= 0:
+                    out.append(parents[out[-1]])
+                return [(nodes[j], times[j]) for j in out]
+
+            def try_goal(i):
+                aims = [s0 for _, s0 in stops] if k == 0 else [arclength[k]]
+                for s_goal in aims:
+                    goal, t_goal = before(lambda t: model.puzzle_T(angle(t))
+                                          @ wire_frame_at(s_goal, entry),
+                                          orient, nodes[i], times[i])
+                    if goal is None or duration(goal, nodes[i]) > ST_MAX_MOVE:
+                        continue
+                    if not at_checkpoint(k, goal, t_goal) or not config_free(goal, t_goal):
+                        continue
+                    if not move_free(goal, nodes[i], t_goal):
+                        continue
+                    return [(goal, t_goal)] + chain_from(i)
+                return None
+
+            found = try_goal(0)
+            best = np.inf
+            while found is None and len(nodes) < ST_MAX_NODES and time.monotonic() < deadline:
+                draw = rng.random()
+                s_new = None
+                if draw < ST_GOAL_BIAS + ST_WIRE_SHARE:  # guided back along the wire
+                    near = (len(nodes) - 1 - int(rng.integers(min(len(nodes), ST_RECENT)))
+                            if rng.random() < 0.5 else int(rng.integers(len(nodes))))
+                    aimed = draw < ST_GOAL_BIAS or rng.random() < ST_AIM_CHECKPOINT
+                    s_goal = stops[int(rng.integers(len(stops)))][1] if k == 0 else arclength[k]
+                    s_new = s_goal if aimed else rng.uniform(arclength[k], progress[near])
+                    w = (arclength[k + 1] - s_new) / span if span > 0 else 1.0
+                    o = orient_from + w * np.angle(np.exp(1j * (orient - orient_from)))
+                    target, _ = before(lambda t: model.puzzle_T(angle(t))
+                                       @ wire_frame_at(s_new, entry), o, nodes[near], times[near])
+                    if target is None:
+                        continue
+                    sample = target if aimed else target + rng.normal(0.0, ST_WIRE_NOISE, 6)
+                else:  # uniform around the tree
+                    pts = np.array(nodes)
+                    lo = np.maximum(pts.min(axis=0) - ST_BOX, q_lo)
+                    hi = np.minimum(pts.max(axis=0) + ST_BOX, q_hi)
+                    sample = rng.uniform(lo, hi)
+                    near = int(np.argmin(np.linalg.norm(pts - sample, axis=1)))
+                if not in_room(sample):  # a noisy wire sample just over the margin
+                    sample = np.clip(sample, q_lo, q_hi)
+                d = sample - nodes[near]
+                scale = min(1.0, ST_STEP / max(np.abs(d).max(), 1e-12))
+                while scale > 0.05 and duration(nodes[near] + scale * d, nodes[near]) > ST_MAX_MOVE:
+                    scale *= 0.7
+                q_new = nodes[near] + scale * d
+                t_new = times[near] - duration(q_new, nodes[near])
+                if not config_free(q_new, t_new):
+                    if REJECT_LOG is not None:
+                        c = scene.clearance(q_new, angle(t_new))
+                        pair = c.pair if c.distance <= c.self_gap else c.self_pair
+                        REJECT_LOG(k, "config", pair, min(c.distance, c.self_gap), t_new)
+                    continue
+                if not move_free(q_new, nodes[near], t_new):
+                    if REJECT_LOG is not None:
+                        chk = check_moves(scene, lambda x: angle(t_new + x), model.omega, timing,
+                                          np.array([q_new, nodes[near]]), np.array([-1, 0]))[0][0]
+                        REJECT_LOG(k, "move", tuple(chk.hits[0]) if chk.hits else ("", ""),
+                                   chk.clearance, t_new + (chk.t_hit or 0.0))
+                    continue
+                nodes.append(q_new)
+                times.append(t_new)
+                parents.append(near)
+                if at_checkpoint(k, q_new, t_new):
+                    found = chain_from(len(nodes) - 1)
+                    progress.append(arclength[k])
+                    break
+                progress.append(progress[near] if s_new is None
+                                else progress[near] + scale * (s_new - progress[near]))
+                gap = progress[-1] - arclength[k]
+                if gap < best or len(nodes) % 25 == 0:
+                    best = min(best, gap)
+                    found = try_goal(len(nodes) - 1)
+            reach_progress[0] = ((arclength[k + 1] - min(progress)) / span) if span > 0 else 1.0
+            return found, len(nodes)
+
+        # The roots: free final configurations with the ring low enough, most clearance first.
+        final = model.checkpoint_T(path, n - 1, angle(0.0))
+        roots = []
+        for o in grid:
+            for q in kin.ik(flange_target(final, float(o[0]), face, float(o[1]), float(o[2]))):
+                if not in_room(q):
+                    continue
+                ring = kin.fk(q) @ to_ring
+                if ring_top_above_pad(np.linalg.inv(model.puzzle_T(angle(0.0))) @ ring) \
+                        >= SUCCESS_HEIGHT:
+                    continue
+                c = scene.clearance(q, angle(0.0))
+                if c.free:
+                    roots.append((c.distance, q, o))
+        roots.sort(key=lambda r: -r[0])
+
+        # At the end the robot stays put while the puzzle keeps turning: prefer final
+        # configurations that stay free for a whole turn (the user: if none exists, plan
+        # anyway and warn; the puzzle is hollow plastic on foam, the hoop magnetic).
+        def stays_free(q) -> bool:
+            return all(scene.clearance(q, angle(0.0) + model.direction * a).free
+                       for a in np.arange(BW_END_STEP, 2 * np.pi, BW_END_STEP))
+
+        waiting = {i for i in range(min(BW_END_CHECKED, len(roots))) if stays_free(roots[i][1])}
+        order = sorted(range(len(roots)), key=lambda i: (i not in waiting, i))
+        roots = [roots[i] + (i in waiting,) for i in order]
+        reach_progress = [0.0]
+        for _, q_root, o_root, root_waits in roots[:BW_ROOTS]:
+            segments = {}  # checkpoint k -> its path to checkpoint k + 1's arrival, orientation
+            tried = {k: [] for k in range(n - 1)}
+            k = n - 2
+            arrival = {n - 1: ((q_root, 0.0), o_root)}
+            while 0 <= k < n - 1:
+                if time.monotonic() - t_wall > BW_TOTAL_LIMIT:
+                    break
+                if len(tried[k]) >= ST_ARRIVALS:
+                    tried[k] = []
+                    k += 1
+                    if k >= n - 1:
+                        break
+                    continue
+                (q_from, t_from), orient_from = arrival[k + 1]
+                order = orientations if not tried[k] else orientations[:ST_RETRY_ORIENTATIONS]
+                found = None
+                for orient in order:
+                    segment, count = reach(k, orient, q_from, t_from, orient_from)
+                    new = segment is not None and all(
+                        abs(segment[0][1] - a[1]) > ST_DIFFERENT[0]
+                        or np.abs(segment[0][0] - a[0]).max() > ST_DIFFERENT[1]
+                        for a in tried[k] if a is not None)
+                    if PASS_LOG is not None:
+                        what = ("NOT reached" if segment is None else
+                                f"reached at t {segment[0][1]:.2f} s"
+                                + ("" if new else " (same as before)"))
+                        PASS_LOG(f"  back to checkpoint {k} try {len(tried[k]) + 1} (tilt "
+                                 f"{np.rad2deg(orient[1]):.0f} deg) from t {t_from:.2f} s: {what}, "
+                                 f"{count} nodes, furthest {100 * reach_progress[0]:.0f} % of the way")
+                    if new:
+                        found = (segment, orient)
+                        break
+                if found is None:
+                    tried[k] = [None] * ST_ARRIVALS
+                    continue
+                tried[k].append(found[0][0])
+                segments[k] = found[0]
+                arrival[k] = (found[0][0], found[1])
+                k -= 1
+                if k >= 0:
+                    tried[k] = []
+            if k >= 0:
+                continue  # this root failed: the next one
+            # Forward order, time shifted so checkpoint 0 is at t = 0.
+            waypoints = list(segments[0])
+            for j in range(1, n - 1):
+                waypoints += segments[j][1:]
+            t0 = waypoints[0][1]
+            theta_start = angle(t0)
+            result.entry = waiting_entry(*waypoints[0])  # the entry the plan waits at
+            result.end_waits = root_waits  # whether the final pose stays free while it turns
+
+            def fwd(t: float) -> float:
+                return theta_start + model.direction * model.omega * t
+
+            def path_free(path) -> bool:
+                moves, _ = check_moves(scene, fwd, model.omega, timing, np.array(path),
+                                       np.zeros(len(path), int))
+                return not any(m.hits for m in moves)
+
+            # Shortcuts: a shortcut makes every later move earlier (the puzzle is at a
+            # different angle then), so one is kept only if the WHOLE path stays free.
+            qs = [q for q, _ in waypoints]
+            for _ in range(rrt_mod.SHORTCUT_TRIES):
+                if len(qs) < 3:
+                    break
+                i, j = sorted(rng.choice(len(qs), size=2, replace=False))
+                if j - i < 2:
+                    continue
+                candidate = qs[:i + 1] + qs[j:]
+                if all(duration(a, b) <= ST_MAX_MOVE for a, b in zip(candidate, candidate[1:])) \
+                        and path_free(candidate):
+                    qs = candidate
+            qs = np.array(qs)
+            result.feasible, result.qs = True, qs
+            result.orientations = np.array([arrival[j][1] for j in range(n)])
+            result.moves, result.arrivals = check_moves(scene, fwd, model.omega, timing, qs,
+                                                        np.zeros(len(qs), int))
+            result.plan = Plan(
+                feasible=result.collision_free,
+                reason="" if result.collision_free else "collision along the final path",
+                speed=float(getattr(timing, "speed", 0.0)), direction=model.direction,
+                theta_start=theta_start, q_start=qs[0],
+                steps=[PlanStep(index=i, q=qs[i], roll=0.0, t_rel=float(result.arrivals[i]),
+                                margin=result.moves[i - 1].clearance if i else np.inf)
+                       for i in range(len(qs))],
+                min_margin=result.min_clearance)
+            result.seconds = time.monotonic() - t_wall
+            return theta_start, result
+        if time.monotonic() - t_wall > BW_TOTAL_LIMIT:
+            break
+    result.reason = (f"backwards from end angle {np.rad2deg(theta_end):.0f} deg: no way back to "
+                     f"a waiting pose ({len(roots)} final configurations)")
+    result.seconds = time.monotonic() - t_wall
+    return None, result
+
+
+BW_WORKERS = BW_END_ANGLES  # processes planning end angles at the same time (~300 MB each)
+
+
+# --- Choosing between finished plans: distance from singularities and joint limits ---
+#
+# User, 2026-11-26: when several end angles give a plan, take the one with the most
+# leeway from the singularities. The executor corrects every step by numerical IK
+# (the flange pose rotated with the turntable): near a singularity a small correction
+# needs large joint changes, and the aborts so far were joint-limit violations. So a
+# plan is scored by the worst, along its whole path (every PLAN_SCORE_STEP of joint
+# motion), of (1) the smallest singular value of the flange Jacobian, its rotation rows
+# scaled by PLAN_SCORE_LENGTH so they compare with metres, and (2) the smallest distance
+# of any joint from its limits. Plans keeping PLAN_MIN_LIMIT_MARGIN come first; among
+# them the largest (1) wins. The others get BW_SCORE_WINDOW after the first usable plan
+# (clamped by BW_TOTAL_LIMIT), or until all end angles are done.
+
+BW_SCORE_WINDOW = 15.0  # s after the first usable plan to wait for others
+PLAN_SCORE_LENGTH = 0.1  # m, scale of the Jacobian's rotation rows (the hoop's lever)
+PLAN_SCORE_STEP = np.deg2rad(2.0)  # rad, sampling along the path
+PLAN_MIN_LIMIT_MARGIN = np.deg2rad(10.0)  # rad, joint-limit room a correction may need
+
+
+def plan_quality(kin, qs: np.ndarray) -> tuple[float, float]:
+    """(smallest scaled Jacobian singular value [m], smallest joint-limit margin [rad])
+    over the whole path (straight joint moves between the waypoints)."""
+    try:
+        from plan_ik import jacobian_finite_forward_differences
+    except ImportError:  # a script that did not put Natka/ on the path
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "Natka"))
+        from plan_ik import jacobian_finite_forward_differences
+    qs = np.asarray(qs, float)
+    samples = [qs[0]]
+    for a, b in zip(qs, qs[1:]):
+        n = max(1, int(np.ceil(np.abs(b - a).max() / PLAN_SCORE_STEP)))
+        samples += [a + (b - a) * (j / n) for j in range(1, n + 1)]
+    sigma, margin = np.inf, np.inf
+    for q in samples:
+        J = jacobian_finite_forward_differences(kin, q).copy()
+        J[3:] *= PLAN_SCORE_LENGTH
+        sigma = min(sigma, float(np.linalg.svd(J, compute_uv=False)[-1]))
+        margin = min(margin, float(np.min(np.minimum(q - kin.q_min, kin.q_max - q))))
+    return sigma, margin
+
+
+def _plan_rank(result) -> tuple:
+    """Sort key (largest best): enough joint-limit room first, then the singular value."""
+    sigma, margin = result.quality
+    return (margin >= PLAN_MIN_LIMIT_MARGIN, sigma, margin)
+
+
+def _with_approach(kin, timing, model, theta, result, approach_from, scene=None) -> None:
+    """With approach_from: plans the approach to a collision-free result's waiting pose
+    (result.approach, result.approach_how); a plan without one does not count
+    (_usable), so another end angle is tried (user, 2026-11-26: the first plan whose
+    waiting pose could not be approached made the whole placement unreachable)."""
+    if approach_from is None or theta is None or not result.collision_free:
+        return
+    approach, how = plan_approach(kin, scene or SoftScene(model), model, theta, timing,
+                                  approach_from, result.qs[0], result.entry)
+    result.approach, result.approach_how = approach, how
+    if approach is None:
+        result.reason = f"plan found, but no approach: {how}"
+
+
+def _usable(theta, result, approach_from) -> bool:
+    return (theta is not None and result.collision_free
+            and (approach_from is None or getattr(result, "approach", None) is not None))
+
+
+def _margin_scene(model, margins) -> SoftScene:
+    """The soft scene with the run's hoop-puzzle margin (solver.uncertainty)."""
+    if margins is None:
+        return SoftScene(model)
+    return SoftScene(model, hoop_puzzle_margin=margins.hoop_puzzle)
+
+
+def _backward_job(job):
+    """One end angle in a worker process (its own kinematics; see plan_spinning)."""
+    timing, model, theta_end, bend_points, seed, approach_from, margins = job
+    from ctu_crs import CRS93
+    kin = CRS93(tty_dev=None)
+    scene = _margin_scene(model, margins)
+    theta, result = plan_backward(kin, timing, model, theta_end, bend_points=bend_points,
+                                  seed=seed, scene=scene,
+                                  joint_margin=margins.joint_limit if margins else 0.0)
+    _with_approach(kin, timing, model, theta, result, approach_from, scene)
+    if _usable(theta, result, approach_from):
+        result.quality = plan_quality(kin, result.qs)
+    return theta_end, theta, result
+
+
+def _plan_backward_parallel(timing, model, angles, bend_points, workers, progress,
+                            approach_from=None, deadline=None, rank=None, margins=None,
+                            accept=None, window=None):
+    """plan_backward for the end angles in `workers` processes; the first usable plan
+    (collision free, and with an approach if approach_from is given) wins and the
+    other workers are stopped."""
+    import multiprocessing
+    jobs = [(timing, model, a, bend_points, i, approach_from, margins)
+            for i, a in enumerate(angles)]
+    import os
+    pool = multiprocessing.get_context("spawn").Pool(
+        max(1, min(workers, len(jobs), os.cpu_count() or 1)))
+    t0 = time.monotonic()
+    limit = min(t0 + BW_TOTAL_LIMIT, np.inf if deadline is None else deadline)
+    usable, deadline = [], limit
+    try:
+        results = pool.imap_unordered(_backward_job, jobs)
+        for _ in jobs:
+            try:
+                theta_end, theta, result = results.next(
+                    timeout=max(0.0, deadline - time.monotonic()))
+            except multiprocessing.TimeoutError:
+                break  # the window (or the limit) is over: the others are stopped
+            if progress is not None:
+                progress(theta_end, result)
+            result.theta_end = theta_end
+            if _usable(theta, result, approach_from) and (accept is None
+                                                           or accept(theta, result)):
+                usable.append((theta, result))
+                if len(usable) == 1:  # the first: the others get the window
+                    wait = BW_SCORE_WINDOW if window is None else window(theta, result)
+                    deadline = min(time.monotonic() + max(0.0, wait), limit)
+        if not usable:
+            return None, None
+        theta, best = max(usable, key=(lambda u: rank(*u)) if rank is not None
+                          else (lambda u: _plan_rank(u[1])))
+        best.candidates = [(r.theta_end, r.quality) for _, r in usable]
+        return theta, best
+    finally:
+        pool.terminate()
+        pool.join()

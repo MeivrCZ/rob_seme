@@ -5,23 +5,26 @@ in the work area and the turntable spinning:
 
 1. perception: images while it spins -> ArUco base measurements (Vojtech's
    measure_base) -> orbit fit (fit_orbit): the TurntableModel, speed included;
-2. planning on the fitted model: solver.planner.plan_spinning (one start
-   angle: the puzzle facing the robot half way through; RRT between the
-   checkpoints, plan_rrt) and plan_approach;
-3. execution: solver.executor.Executor with a PhaseTracker: ModelTracker on
-   the fitted model (the Kalman tracker P3.1 is not done yet: no updates), or
-   with --tracker truth a perfect tracker read from the simulator;
+2. planning on the fitted model: solver.planner.plan_spinning (backwards in
+   time from end angles, plan_backward: the start angle follows) and
+   plan_approach;
+3. execution: solver.executor.Executor with a PhaseTracker: by default
+   Vojtech's CameraPhaseTracker (camera_phase_tracker.py: keeps measuring the
+   base in camera images while the robot works and updates the angle), or
+   ModelTracker on the fitted model (--tracker fitted: no updates), or a
+   perfect tracker read from the simulator (--tracker truth);
 4. evaluation: how far the tracker's angle is from the truth at the start, the
    simulator's collision monitor, the ring's height above the pad at the end.
 
     uv run python Prokop/experiments/spin_plan.py [--seed N] [--direction 1|-1]
-        [--tracker fitted|truth] [--port P]
+        [--tracker camera|fitted|truth] [--port P] [--axis X Y [--offset X Y]]
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -32,11 +35,13 @@ PROKOP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROKOP))
 sys.path.insert(0, str(PROKOP / "experiments"))
 
-from run_solver import simulated_calibration  # noqa: E402  (puts Vojtech's dirs on the path)
+from run_solver import simulated_calibration, watch_tracker  # noqa: E402  (puts Vojtech's dirs on the path)
+from advanced_aruco import AdvancedArucoFinder  # noqa: E402
 from aruco_block_detector import ArucoBlockDetector  # noqa: E402
+from camera_phase_tracker import CameraPhaseTracker  # noqa: E402
 from cell import WORK_AREA_XY  # noqa: E402
 from ctu_crs import CRS93  # noqa: E402
-from placement import TaskScene  # noqa: E402
+from placement import Placement, TaskScene  # noqa: E402
 from sim_process import SimProcess  # noqa: E402
 from simulation import CollisionError  # noqa: E402
 from turntable_orbit import (MARKER_HEIGHT_ABOVE_TABLE_M, capture_series,  # noqa: E402
@@ -87,13 +92,19 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1, help="random placement")
     parser.add_argument("--direction", type=int, choices=(-1, 1), default=1)
     parser.add_argument("--speed", type=float, default=0.5, help="relative robot speed")
-    parser.add_argument("--tracker", choices=("fitted", "truth"), default="fitted")
+    parser.add_argument("--tracker", choices=("camera", "fitted", "truth"), default="camera")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--axis", type=float, nargs=2, metavar=("X", "Y"),
+                        help="turntable axis [m] instead of the seed's placement")
+    parser.add_argument("--offset", type=float, nargs=2, metavar=("X", "Y"), default=(0.02, 0.0),
+                        help="base offset from the axis [m] (with --axis)")
     args = parser.parse_args()
 
     kin = CRS93(tty_dev=None)
     timing = RobotTiming(kin, args.speed)
-    placement = TaskScene().random_placement(np.random.default_rng(args.seed), WORK_AREA_XY)
+    placement = (TaskScene().random_placement(np.random.default_rng(args.seed), WORK_AREA_XY)
+                 if args.axis is None else
+                 Placement(np.array(args.axis), np.array(args.offset), 0.0))
     sim = SimProcess(port=args.port)
     robot = sim.robot
     robot.initialize(home=False)
@@ -137,7 +148,7 @@ def main() -> None:
 
         def progress(theta, r):
             what = "collision free" if r.collision_free else (r.reason or "moves collide")
-            print(f"  start angle {np.rad2deg(theta):+6.1f} deg: {what} "
+            print(f"  end angle {np.rad2deg(theta):+6.1f} deg: {what} "
                   f"({r.seconds:.0f} s)", flush=True)
 
         theta_start, result = plan_spinning(kin, timing, model, progress=progress)
@@ -157,12 +168,31 @@ def main() -> None:
               f"{np.round(np.rad2deg(result.orientations[:, 1])).astype(int).tolist()} deg; "
               f"approach: {how}", flush=True)
 
+        if not getattr(result, "end_waits", True):
+            print("WARNING: no final pose stays clear of the turning puzzle: after the end the "
+                  "puzzle will hit the arm (harmless: hollow puzzle on foam, magnetic hoop)",
+                  flush=True)
+
         # 3. Execution: the executor sends the traversal steps (not the start pose) and
         # moves through the approach's pre-entry pose(s) to the start.
         plan = replace(result.plan, steps=result.plan.steps[1:],
                        approach=[np.asarray(q) for q in approach[1:-1]])
-        tracker = (ModelTracker(model) if args.tracker == "fitted"
-                   else TruthTracker(sim, args.direction, float(placement.base_yaw), model))
+        camera = None
+        if args.tracker == "camera":
+            camera = CameraPhaseTracker(AdvancedArucoFinder(detector, calibration, model),
+                                        robot.grab_image, robot.camera_delay)
+            tracker = camera.__enter__()
+            ready = tracker.wait_ready(timeout=15.0)
+            print(f"camera tracker: {'ready' if ready else 'NOT ready after 15 s'}", flush=True)
+            if not ready:
+                camera.__exit__(None, None, None)
+                return
+            watch_stop = threading.Event()
+            threading.Thread(target=watch_tracker, args=(camera, watch_stop), daemon=True).start()
+        elif args.tracker == "fitted":
+            tracker = ModelTracker(model)
+        else:
+            tracker = TruthTracker(sim, args.direction, float(placement.base_yaw), model)
         executor = Executor(robot, model, plan, tracker, timing,
                             log=lambda s: print("  executor: " + s, flush=True))
         collision = None
@@ -170,6 +200,11 @@ def main() -> None:
             outcome = executor.run()
         except CollisionError as error:
             collision, outcome = error, None
+        finally:
+            if camera is not None:
+                watch_stop.set()
+                last = camera.estimate()
+                camera.__exit__(None, None, None)
         t_end = time.monotonic()
 
         # 4. Evaluation.
@@ -178,6 +213,13 @@ def main() -> None:
             drift = yaw_error(model, true_model(t_go), t_go)
             print(f"start: {t_go - t_fit:.0f} s after the fit; the fitted model's base "
                   f"orientation was off by {np.rad2deg(drift):+.2f} deg at the start", flush=True)
+            if camera is not None:
+                truth_go = true_model(t_go)
+                err = wrap(last.predict(t_go)[0] + model.base_yaw
+                           - truth_go.theta_at(t_go) - truth_go.base_yaw)
+                print(f"camera tracker: last measurement {t_end - last.t:.1f} s before the end; "
+                      f"its base orientation at the start (predicted back) off by "
+                      f"{np.rad2deg(err):+.2f} deg", flush=True)
         true_now = true_model(t_end)
         ring = np.linalg.inv(true_now.puzzle_T(true_now.theta_at(t_end))) \
             @ kin.fk(robot.get_q() if collision is None else collision.q_stop) @ ring_in_flange()

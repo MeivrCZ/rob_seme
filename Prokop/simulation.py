@@ -58,6 +58,7 @@ Acceleration units are assumed (IRC*256/ms^2) and match the real ramps to ~x2.
 from __future__ import annotations
 
 import atexit
+import collections
 import threading
 import time
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ SEND_DELAY = 0.025  # move_to_q blocks (serial write of the command)
 QUERY_DELAY = 0.05  # get_q round trip
 STATUS_DELAY = 0.01  # in_motion round trip
 CAMERA_DELAY = 0.11  # age of the image when grab_image returns
+RENDER_RESERVE = 0.09  # s before grab_image returns: stop waiting for the monitor, render
 # Real grab_image duration [s] (ctu_crs starts and stops the camera per call) and
 # of the first call (opens the camera); for the simulated camera.
 GRAB_TIME = 0.186
@@ -310,6 +312,7 @@ class CRS93Sim(CRS93):
         self.camera_delay = camera_delay
         self.camera = Camera()
         self._camera_opened: set[int] = set()  # threads that called grab_image
+        self.grab_log = collections.deque(maxlen=5000)  # grab_image timings (diagnostics)
         self._lock = threading.Lock()
         self._running = True  # the threads run until stop()
         self._segments: list[Segment] = []
@@ -458,21 +461,24 @@ class CRS93Sim(CRS93):
         self._checked = min(self._checked, self._now())
         self._dirty = True
 
-    def _await_checked(self, t: float) -> None:
+    def _await_checked(self, t: float, until: float | None = None) -> None:
         """Waits until the collision monitor has checked the scene up to sim time
         @t, so that no state is reported that a collision would still change.
 
         Only matters when the monitor falls behind the clock (time_scale > 1 or
-        a slow computer); gives up after MONITOR_WAIT seconds of wall time.
+        a slow computer); gives up after MONITOR_WAIT seconds of wall time, or at
+        sim time @until.
 
         Args:
             t: Sim time.
+            until: Sim time to stop waiting at (None: only MONITOR_WAIT).
         """
         if not self._collisions_on:
             return
         deadline = time.monotonic() + MONITOR_WAIT
         while (self._checked < t and self._collision is None
-               and time.monotonic() < deadline):
+               and time.monotonic() < deadline
+               and (until is None or self._now() < until)):
             time.sleep(0.002)
 
     def _guard(self, motion: bool) -> None:
@@ -699,11 +705,22 @@ class CRS93Sim(CRS93):
         t_return = t_call + (FIRST_GRAB_TIME if first else GRAB_TIME)
         t_image = t_return - self.camera_delay
         self._sleep(t_image - self._now())
-        self._await_checked(t_image)
+        # The camera keeps its timing (the image is camera_delay old when the call
+        # returns): the wait for the collision monitor is cut off in time to render.
+        # Otherwise, while the arm moves and the monitor lags, the image came back
+        # up to 0.34 s late and the tracker took it for newer than it was
+        # (docs/PLANNER_EXPERIMENTS.md 9.6). A late check only matters at a collision.
+        self._await_checked(t_image, until=t_return - RENDER_RESERVE)
+        t_checked = self._now()
         image = renderer.render(self._q_at(t_image), self.viewer.placement,
                                 self.viewer.turntable_angle(t_image))
+        t_rendered = self._now()
         self._camera_view.image = image[::4, ::4, ::-1]  # RGB, 480 x 300
         self._sleep(t_return - self._now())
+        # For diagnostics (sim clock): when the image shows the scene, when the
+        # collision monitor had checked up to it, when it was rendered, when the
+        # call should return and when it does.
+        self.grab_log.append((t_image, t_checked, t_rendered, t_return, self._now()))
         return image
 
     def release(self):

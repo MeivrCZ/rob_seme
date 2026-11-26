@@ -83,6 +83,39 @@ def test_hoop_follows_the_spinning_puzzle(direction):
         sim.viewer.server.stop()
 
 
+def test_corrected_arrivals_are_timed_for_the_configuration_sent():
+    """With real corrections (the tracker's speed 15 % off: the error grows during the
+    traversal, a constant offset would only shift the start) every recorded arrival is the
+    timing of the configuration actually sent, and the simulator agrees (the old fixed
+    3 passes kept the arrival of the pass before, docs/PLANNER_EXPERIMENTS.md 9.6)."""
+    from dataclasses import replace
+    sim, truth = spinning_sim(((0.45, 0.02), (0.02, -0.01), 0.4), 1)
+    try:
+        theta_start = truth.theta_at(time.monotonic() + 2.0)
+        plan, _ = puzzle_fixed_plan(truth, theta_start, speed=0.3)
+        sent_end = []
+        move = sim.move_to_q
+
+        def recording_move(q):
+            move(q)
+            sent_end.append(sim._motion_end() + sim._t_start)
+
+        sim.move_to_q = recording_move
+        off = ModelTracker(replace(truth, omega=1.15 * truth.omega))
+        timing = RobotTiming(sim, plan.speed)
+        result = Executor(sim, truth, plan, off, timing, log=lambda *a: None).run()
+        assert result.success, result.reason
+        assert max(abs(r.dtheta) for r in result.steps) > D(1)  # real corrections
+        q_last = plan.q_start
+        for rec, t_end in zip(result.steps, sent_end[-len(plan.steps):]):
+            start = rec.t_arrival - timing.move_duration(q_last, rec.q)
+            assert start >= rec.t_send + timing.command_delay - 1e-9  # a consistent start
+            assert rec.t_arrival == pytest.approx(t_end, abs=0.03)  # the simulator agrees
+            q_last = rec.q
+    finally:
+        sim.viewer.server.stop()
+
+
 def test_infeasible_plan_is_reported_and_nothing_moves():
     sim = simulation.CRS93Sim(port=0, keep_alive=False, collisions=False)
     try:

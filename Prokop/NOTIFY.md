@@ -1,4 +1,4 @@
-# Notes for the team (2026-10-20, updated 2026-11-18)
+# Notes for the team (2026-10-20, updated 2026-11-26)
 
 ## Vojtěch: changes in Prokop/ that affect your current code
 
@@ -232,3 +232,63 @@ they are the environment's ground truth. There is now a model for planning:
   the margins).
 - The hoop's hole is 30.0 mm in radius in the CAD, not 31.2 mm (62.4 mm
   diameter): about 23 mm of room around the bar.
+
+## Everyone: the whole pipeline runs end to end (2026-11-26)
+
+`uv run Prokop/run_solver.py` now runs perception → planning → execution with
+the spinning puzzle and succeeds in the sim (ring 24.4 mm above the pad). New
+defaults: Prokop's planner (`--planner prokop`; Natka's still with `--planner
+natka`/`copy`), the camera tracker (`--tracker camera`), speed 0.5. How the
+planner works and every experiment behind it: `Prokop/docs/PLANNER_EXPERIMENTS.md`
+(the spinning puzzle is planned backwards in time from the end, so the start
+angle falls out; 6 end angles in parallel, ~25–85 s).
+
+What changed that you may run into:
+
+- **`solver/executor.py`:** the correction of each step is now solved as a fixed
+  point by secant steps (the old fixed 3 passes kept a stale arrival time and
+  over-corrected), and each step's send time is fixed 80 ms ahead of its IK (the
+  IK delayed every command by ~35 ms). Test:
+  `test_corrected_arrivals_are_timed_for_the_configuration_sent`.
+- **`simulation.py`:** `grab_image` keeps its timing (image 0.11 s old on return)
+  even while the collision monitor lags; before, images came back up to 0.34 s
+  late while the arm moved.
+- **`sim_process.py`:** the standalone simulator (`SimProcess`); `run_solver.py`
+  uses it.
+- **The 120 s limit** (program start → hoop < 4 cm above the base, threaded):
+  `run_solver.py` keeps one deadline from the program start; planning goes on as
+  long as a plan could still end in time, the plan that ends soonest is taken, and
+  the executor stops at the deadline (`Executor(..., deadline=...)`).
+- **Margins from the uncertainties** (`solver/uncertainty.py`, k = 2): the hoop
+  keeps ~5.5–7 mm from the puzzle (was 3 mm) and every planned configuration
+  ≥ ~5.5° from the joint limits, from the run's fit residuals, the tracker's phase
+  sd and ±2 mm for the ruler-measured parts.
+- **Approach:** the turning task as 6 coaxial rings (turntable, base, stem,
+  vertical run + jog, bend, top bar); home → a pre-pre-entry pose outside the
+  rings → the waiting pose (2–4 s to plan, was 20–60 s).
+- **Results so far** (20 random placements, `docs/PLANNER_EXPERIMENTS.md` 9.7):
+  3 done within 120 s, 9 outside the camera's view, 8 not planned in time —
+  online planning is too slow; a plan library is next.
+
+## Vojtěch: your camera tracker, and your branch (2026-11-26)
+
+- **Copied unchanged from `AdvAruco-SimSolve` (`1a08f98`):**
+  `ArucoFinder/camera_phase_tracker.py`, `ArucoFinder/advanced_aruco.py`,
+  `ArucoFinder/tests/test_advanced_aruco.py` (all 7 tests pass). Nothing else
+  of your branch is merged.
+- **How it is used:** `run_solver.py` measures with it until 0.5 s before the
+  traversal, then stops it and follows the fitted model re-anchored on its last
+  angle (a 5–12 s traversal drifts only ~0.1–0.3°; no camera grabs compete with
+  the robot's commands). Prints "lost aruco, believing model" / "found aruco
+  again, updating model" from outside your code.
+- **What we found while testing it** (`docs/PLANNER_EXPERIMENTS.md` 9.6): the
+  measurements are accurate (< 1 mm, < 1°, also with one marker; a −1.5° blip
+  for ~0.4 s when the second marker reappears). Two things for you to decide:
+  a measurement within the 6° gate replaces the angle entirely (no blending), so
+  late or biased images walk the angle off in steps; and the speed is never
+  updated (`SPEED_SD` 0.8°/s makes the uncertainty cross the executor's 3°
+  limit after ~4 s without measurements).
+- **Your branch will conflict with ours:** it edits `Prokop/solver/executor.py`
+  (we changed the step loop), `simulation.py`, `contracts.py`, `timing.py`, and
+  `solver/puzzle_plan.py` imports `solver.feasibility` and `solver.ik_batch`,
+  which were removed on 2026-11-24 (superseded). Let's talk before merging.

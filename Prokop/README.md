@@ -136,11 +136,14 @@ Prokop's parts so far:
 | `solver/timing.py` | P3.2 | the robot's measured timing; `schedule()` gives the arrival times of queued moves, with blending |
 | `solver/approach.py` | P2.7 | collision-free approach paths: straight task-space line (`plan_line`, IK from Natka's `plan_ik`) checked against the cell, the table, the spinning task's swept volume and self-collision |
 | `solver/correction.py` | P3.4 | planned targets corrected for the turntable's actual phase (Natka's numerical IK, `plan_ik.ik_numerical`) |
-| `solver/executor.py` | P3.3 | runs a `Plan`: approach, wait for the start phase, send each step just in time with its correction, abort safely |
+| `solver/executor.py` | P3.3 | runs a `Plan`: approach, wait for the start phase, send each step just in time with its correction (solved as a fixed point by secant steps; each step's send time fixed ahead of its IK), abort safely |
 | `solver/soft_collision.py` | — | soft collision model for planning: boxes from `models/soft/*_soft.urdf`, separating-axis distances (lower bounds), hierarchy; see [docs/SOFT_COLLISION.md](docs/SOFT_COLLISION.md) |
 | `solver/wire.py` | — | puzzle D's wire (centreline measured on the CAD) and its checkpoints at a granularity tier |
 | `solver/hoop_pose.py` | — | flange poses that put the ring centre on a checkpoint (side, tilt, roll); IK candidates |
-| `run_solver.py` | I1 | the whole pipeline phase by phase in the sim (Vojtěch's perception, Natka's planner, our parts), each phase checked against the sim's truth; stops at the first failing phase. `uv run Prokop/run_solver.py --seed 3 --direction -1 [--stop-after 2] [--hold]`; log + frames in `Prokop/runs/` |
+| `solver/planner.py` | P2 | Prokop's planner: static puzzle (tiers / RRT between checkpoints), spinning puzzle planned **backwards in time** from end angles in parallel (`plan_spinning`, `plan_backward`), approach clear of the swept volume (`plan_approach`); see [docs/PLANNER_EXPERIMENTS.md](docs/PLANNER_EXPERIMENTS.md) |
+| `solver/rrt.py` | — | joint-space RRT with time-aware edges, shortcutting (lab 6) |
+| `sim_process.py` | — | the simulator as a standalone process: the solver gets only a `ctu_crs.CRS93`; scene setup and ground truth on the `SimProcess` handle |
+| `run_solver.py` | I1 | the whole pipeline phase by phase in the sim: Vojtěch's perception, Prokop's planner (`--planner natka\|copy` for Natka's), the executor with Vojtěch's `CameraPhaseTracker` (`--tracker fitted` for the model alone); each phase checked against the sim's truth, execution diagnostics (`execution.pkl`, `experiments/execution_replay.py`); stops at the first failing phase. `uv run Prokop/run_solver.py [--seed 3 --direction -1 \| --axis X Y --offset X Y --yaw DEG] [--stop-after 2] [--hold]`; log + frames in `Prokop/runs/` |
 
 In the sim with the puzzle spinning (both directions) and a perfect tracker, the
 executor keeps the hoop target within 3 mm of its planned place on the puzzle,

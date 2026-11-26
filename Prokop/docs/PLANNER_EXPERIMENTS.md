@@ -273,20 +273,242 @@ rejections logged by body pair on the way to checkpoint 5 (1039):
 
 **~80 % is the forearm hit by the turning top bar** (it sticks out 85 mm at a
 height of 155 mm; facing the robot, it is under the forearm while the ring
-goes down). Status: the spinning puzzle is **not solved yet**.
+goes down). Status: not solved forwards — see 9.4 (backwards).
+
+### 9.4 Planning backwards in time (user design) — first success
+
+`plan_backward` in `solver/planner.py`: the root is the ring in the stem at
+t = 0 with the puzzle at an end angle (`end_angles`: the top bar pointing away
+from the robot first, then 30° steps); every new node is earlier than its
+parent by the move's duration (the move new → parent is checked in forward
+time); checkpoints in reverse as subgoals down to checkpoint 0, which must be
+a waiting pose. The puzzle's angle there is the start angle (the robot waits
+for it). Otherwise as 9.3 (wire-guided, free roll, position-only, ≤ 1.2 s
+moves, backtracking). `plan_spinning` uses it for a spinning puzzle.
+
+| Run | Result |
+|---|---|
+| central placement (0.487, 0), offset 20 mm, speed 0.5, true model (`backward_plan.py`) | stem → checkpoints 5, 4, 3 in single moves (5 s of planning) — the forearm/top-bar problem of 9.3 gone; the top bar (back to checkpoint 1) is now the hard part (138 rejections, one backtrack) |
+| same, first version | full path found, but **collided after shortcutting** (bug): each shortcut was checked alone, yet it makes every later move earlier (another puzzle angle). Fix: a shortcut is kept only if the whole path stays free |
+| same, fixed | **collision free**: 8 waypoints, traversal 5.3 s, start angle −123° (top bar 59° from the robot), least soft clearance 0.6 mm, 96 s |
+| **end to end in the simulator** (`spin_plan.py --axis 0.487 0`): perception → plan on the fitted model → approach → executor (ModelTracker) | **SUCCESS**: ring 24.4 mm above the pad, no collision. End angles −104°, −74° failed (budget 120 s), −134° planned in 29 s; 5 waypoints, traversal 4.2 s planned / **6.1 s driven**; the fitted model **7.4° off** at the start (period 27.95 vs 28.00 s, 318 s after the fit) — worked anyway |
+
+**Sanity sweep, 6 placements** (`spin_sanity.py`: true model, then an
+independent replay against the **exact** meshes with the puzzle turning, every
+0.5° of joint motion). Goal share of the tree raised 20 → 50 % (user: as in
+the homework; checkpoint-to-checkpoint moves are mostly direct), wire-guided
+40 %, uniform 10 %.
+
+| Placement (axis, base offset, yaw, spin) | first sweep | after the entry fix |
+|---|---|---|
+| (0.487, 0), (20, 0) mm, 0°, + | plan 132 s, exact 8.2 mm | plan 318 s (2 end angles failed), exact 4.8 mm |
+| (0.45, +0.10), (0, 30) mm, 60°, + | plan 46 s, exact 4.4 mm | plan 73 s, exact 4.7 mm |
+| (0.43, −0.05), (0, −20) mm, 0°, − | plan 79 s, exact 4.9 mm | plan 164 s, exact 6.4 mm |
+| (0.52, −0.10), (−30, 0) mm, −90°, + | **no plan** (771 s) | plan 77 s, exact 6.5 mm |
+| (0.55, +0.08), (25, 25) mm, 150°, − | **no plan** (797 s) | plan 59 s, exact 5.5 mm |
+| seed 1 (0.595, 0.183), (28, −35) mm, 0°, + | **no plan** (763 s) | plan 50 s, exact 9.3 mm |
+
+**Every plan replayed without contact** (soft clearance 0.5–3.4 mm, exact
+4.4–9.3 mm: the soft model stays conservative). Why the three failed
+(`backward_plan.py`): the trees got the ring back along the whole top bar
+(100 % of the way) but never "arrived" — checkpoint 0 was only the 15 mm
+entry, where no pose could wait clear of the swept volume; the larger
+entries (30, 50, 80 mm) came after it in a loop and never got time. **Fix:**
+checkpoint 0 accepts any entry (the wire laid out from the largest; the ring
+leaves the bar backwards along the straight top-bar axis; a pose at any entry
+counts if it can wait), the plan records the entry it waits at. The entry
+cannot be chosen first as in the static planner: where a pose can wait
+depends on the start angle, known only at the end.
+
+Problem left: **planning time, 302 s** (failing end angles use their whole
+budget). Options: end angles in parallel, smaller budgets, the plan library,
+faster checks.
+
+### 9.5 Camera tracker, the end pose, parallel end angles
+
+**Vojtěch's `CameraPhaseTracker`** (only `camera_phase_tracker.py` +
+`advanced_aruco.py` + its test copied unchanged from his branch
+`AdvAruco-SimSolve`, commit `1a08f98`; nothing else of the branch merged):
+keeps measuring the base in camera images while the robot works. Default
+tracker of `spin_plan.py` (`--tracker camera`). A watcher in `spin_plan.py`
+prints once "lost aruco, believing model" (latest measurement > 1 s old) and
+once "found aruco again, updating model" (user request; his file unchanged).
+
+End to end, central placement: **SUCCESS** (ring 24.4 mm); plan 103 s; the
+fitted model alone would have been **5.3° off** at the start, the camera
+tracker **0.86°**; traversal 5.7 s driven vs 5.2 s planned (the camera
+thread did not visibly slow the commands); the tracker had no new
+measurement for the last 4.3 s (arm over the markers, probably).
+
+**Collision after the end:** the robot holds the final pose while the puzzle
+keeps turning; the top bar came round and hit the forearm (simulator monitor,
+a few seconds after SUCCESS). The user: prefer a final pose that stays free
+for a whole turn, else plan anyway and warn (harmless: hollow plastic puzzle
+on foam, magnetic hoop). Implemented: the 40 final poses with most clearance
+are checked over a full turn (5° steps); those that stay free are tried first;
+`result.end_waits`, warning in `spin_plan.py`. In the runs so far no such pose
+exists (the ring is threaded on the off-axis stem, which carries it round).
+
+**Parallel end angles** (`BW_WORKERS = 3` processes, first collision-free
+plan wins, the others stopped):
+
+| Placement | one after another | parallel (3) | exact replay |
+|---|---|---|---|
+| (0.487, 0), central | 318 s | **44 s** | no contact, 9.8 mm |
+| (0.43, −0.05), spin − | 164 s | **86 s** | no contact, 6.4 mm |
+
+**Workers:** one process per end angle by default (`BW_WORKERS =
+BW_END_ANGLES`, capped at the core count) — the user: 3 attempts in the
+assignment, so even 120 s of planning per attempt is too long; the lab PC
+runs it, memory can be freed.
+
+**Profile of one backward search** (`profile_breakdown.py`; central
+placement, first end angle, one process; 75 s under the profiler — about 1.5×
+slower than without): plan found, 11 tree searches (5 of them failed, each
+using its whole 6 s budget), then shortcuts.
+
+| Block | calls | time | share |
+|---|---|---|---|
+| tree searches between checkpoints | 11 | 40.9 s | 54 % |
+| — continuous move checks in the tree | 85 | 23.1 s (272 ms each) | 31 % |
+| — pose before a node on the wire (IK over the roll grid) | 492 | 12.0 s | 16 % |
+| — direct tries to the checkpoint | 32 | 3.3 s | 4 % |
+| — configuration checks | 104 | 0.3 s | 0 % |
+| **shortcuts (whole path rechecked per shortcut)** | 8 | **22.2 s** | **29 %** |
+| final poses that stay free for a turn | 40 | 1.6 s | 2 % |
+| *building blocks:* soft clearance of one configuration | 15 895 | 49.2 s (3.1 ms each) | 65 % |
+| *building blocks:* analytic IK | 15 336 | 11.0 s (0.7 ms each) | 15 % |
+| *building blocks:* forward kinematics | 45 343 | 5.0 s | 7 % |
+
+So **~70 % of the time is the continuous checks** (the soft clearance at
+every sample; inside it the 15-axis box test `box_gaps` and NumPy's `cross`
+dominate), the rest mostly IK. The tree searches are bounded by wall-clock
+budgets, so a faster check means more search per budget rather than less
+time; the shortcuts are fixed work (each rechecks the whole remaining path).
+
+### 9.6 The whole pipeline in run_solver.py; why execution aborted
+
+`run_solver.py` now runs Prokop's planner (`--planner prokop`, default) and
+the camera tracker (`--tracker camera`, default), speed 0.5, `--axis/--offset/
+--yaw` for a chosen placement. Default run (seed 0): plan in 35–48 s, but the
+executor **aborted at step 7 of 9** every time ("correction of −4.9 … −7.2°
+not acceptable"; the user also saw 16.2°), the ring 116 mm above the pad.
+
+Diagnosed with `ExecutionProbe` in `run_solver.py` (simulator only: tracker
+estimates vs the truth, link call timings, step arrivals vs the truth, which
+check of the correction failed) and `experiments/execution_replay.py` (re-renders
+every tracker frame offline and feeds it through the tracker):
+
+* the abort: rotating step 7's target by the correction put **joint 3 outside
+  its limits**; the correction came from a **tracker error of −4 to −5°**;
+* the measurements are accurate (< 1 mm, < 1°, single marker included; a
+  −1.4…−1.7° blip for ~0.4 s when the second marker reappears); the tracker's
+  logic is not the cause;
+* **the cause: the simulated camera returns late while the arm moves** — up
+  to 0.34 s (stamp late = the wait for the collision monitor before rendering;
+  transfer ~1 ms). The tracker stamps return − 0.11 s, so the image is older
+  than it believes: up to 4.3° of apparent lag. Rendered at the true times,
+  the replay reproduces the live errors exactly (−4.22°, −3.66°). At rest the
+  stamps are ~12 ms late. A simulator artefact (no monitor on the real
+  camera), but the real robot would fail the same way with late images;
+* the tracker takes a measurement within 6° of its prediction entirely (no
+  blending) and it becomes the reference, so errors walk in steps; it does
+  not update the speed (≈ 0.15° over a 7 s traversal);
+* the robot arrives 0.07–0.12 s late per step (~1.2–1.7° of correction
+  missed); robot commands waited up to 385 ms on the simulator link behind
+  camera grabs (mostly absorbed: the executor sends ahead).
+
+**Fixes** (user: do all three, then the executor):
+
+1. *Simulated camera keeps its timing:* `grab_image` stops waiting for the
+   collision monitor `RENDER_RESERVE` (0.09 s) before it must return →
+   stamps at most 30 ms late (was 338 ms). (`test_grab_image_timing_and_age`
+   failed once in a full-file run under load, then passed 3 alone + 2 full runs.)
+2. *Tracker frozen for the traversal* (`FreezingTracker` / `FreezingExecutor`
+   in `run_solver.py`; Vojtěch's file unchanged): the camera tracker measures
+   until LEAD (0.5 s) before the start, is then stopped (no grabs compete
+   with robot commands; late images cannot pull the angle off), and the
+   traversal follows the fitted model re-anchored on its last angle (with the
+   ModelTracker's zero uncertainty: the camera tracker's placeholder speed
+   uncertainty, 0.8°/s, would cross the executor's 3° limit after ~4 s).
+   Stopping it at the start itself delayed step 0 by ~0.09 s (it waits for
+   the grab in progress), hence LEAD before.
+3. *Lateness:* the timing model's command delay equals the simulator's
+   (0.12 s); the 0.1 s came from commands waiting behind grabs (fixed by 2).
+
+**Executor bugs** (`solver/executor.py`, found with the replay and an
+offline replay of each step's correction rounds):
+
+* the fixed point kept the arrival of the round before the configuration it
+  sent → with growing corrections it believed itself late and over-corrected
+  (step 5: +4.4° applied, −4.0° needed);
+* repeating x ← f(x) does not converge: a correction changes the move's
+  duration — at some steps f creeps (+1.1 → +4.5° after 12 rounds), at others
+  it swings between two values (+6.1° ↔ −1.0°); **now solved as f(x) = x by
+  secant steps**, warm-started from the previous step's correction;
+* the numerical IK of a correction takes ~35 ms, which silently delayed every
+  command (arrivals −35 ms off) → **the send time is fixed COMPUTE_BUDGET
+  (80 ms) ahead, the step solved for it and sent exactly then** (arrivals
+  within 3 ms of the simulator); new test
+  `test_corrected_arrivals_are_timed_for_the_configuration_sent` (tracker
+  speed 15 % off).
+
+**Result: default pipeline SUCCESS** (seed 0): plan 40 s (15 waypoints,
+traversal 12.4 s), driven in 12.8 s, ring 24.4 mm above the pad; tracker
+−0.18° at the freeze, every correction ≈ 0 (the frozen model and the plan
+agree; the truth needed ≤ 0.15°).
+
+### 9.7 Twenty random placements, the 120 s limit, margins from the uncertainties
+
+`experiments/batch_summary.py` over `run_solver.py --seed 1..20` (spin alternating):
+
+| Batch | what changed | success | unreachable: perception | planning | aborted |
+|---|---|---|---|---|---|
+| 1 | (9.6 fixes) | 8 (5 of them > 120 s) | 9 | 2 (no approach) | 1 (freeze skipped) |
+| 2 | fixed time budget (planning ≈ 55 s, worst-case reserve) + approach in the workers | 1 | 9 | 10 | 0 |
+| 3 | dynamic deadline (a plan counts if it ends ≤ 117 s) + uncertainty margins + ring approach | 3 (96, 108, 114 s) | 9 | 8 | 0 |
+
+* **Perception (9/20 every time)**: the edge placements (|y| ≳ 0.2 or x ≳ 0.6):
+  markers in 0–3 of 8 images. Correct by the user's rule (no markers = outside
+  the working area); the random placements cover more than the camera sees.
+* **The 120 s limit** (user: program start → hoop < 4 cm, threaded): times per
+  phase of batch 1: perception 8 s, planning 29–97 s, execution 21–43 s (approach
+  + tracker ~10 s, the wait for the start angle 3–27 s, traversal 6–13 s); 5 of 11
+  successes were over. Now: one deadline from the program start (the simulator's
+  own start-up excluded), planning until a plan could still end in time, the plan
+  that ends soonest chosen (singularity score as tie-break), the executor stops at
+  the deadline.
+* **Freeze fix** (batch 1 seed 5): the camera tracker is frozen unconditionally at
+  the start of the final wait.
+* **Approach counted in the plan choice** (seeds 7, 18: the first plan had no
+  approach) and rebuilt (user design): the turning task as 6 coaxial **rings**
+  (turntable, base + the puzzle's foot, stem, vertical run + jog, bend, top bar;
+  inner and outer radius, height), the long move home → a **pre-pre-entry pose**
+  checked against the rings only (no table, no cell), the last move into the
+  waiting pose with the full swept check. Found on the way: seed 18's waiting
+  pose was 3° from two joint limits, so every pre-entry pose with the same hoop
+  orientation was out of limits → the pre-pre-entry pose fixes only the ring's
+  position; candidates tried by the shortest last move. Approach 20–58 s → 2–4 s.
+* **Margins from the uncertainties** (`solver/uncertainty.py`, k = 2, ±2 mm
+  dimensions, user): angle sd 0.88° (tracker 0.8° one marker + speed sd × 12 s),
+  hoop–puzzle **5.5–6.8 mm** (was 3), every configuration **≥ 5.5° from the joint
+  limits** (room for the executor's corrections; was none).
+* **What limits now: planning speed.** With the margins and 6 workers sharing the
+  CPU with the simulator, one end angle takes 65–91 s (standalone, 3 mm margin:
+  23–56 s): plans arrive too late (predicted ends 126–150 s) or not within 98 s.
+  Next: the plan library / seeding trees (user idea, section 10).
 
 ## 10. Open ideas (not built yet)
 
-- **Planning backwards in time** (user): fix the hard end (ring in the stem at
-  an end angle with the top bar out of the forearm's way), grow the tree back
-  to checkpoint 0; the start angle follows (the robot can wait only at the
-  start). Moves are time-symmetric, so the same checks apply.
+- **Parallel end angles** (planning time): one process per end angle, first plan wins.
 - **Null-space steps** (user): with only the ring centre fixed the arm can
   reconfigure (tilt, tilt direction, roll) while the ring stays put, e.g. to
   lift the forearm out of the top bar's way.
 - **Start angle by the top bar's direction during the descent** (sweep started,
   2 angles done: at offset 0 the bar points 20° from the robot at t = 5 s).
-- **Plan library** (user): rotation about the robot axis and the free start
+- **Seeding trees / plan library** (user; now the main limit, 9.7): keep the trees of
+  precomputed placements; load the nearest, prune what collides, grow from it. Cheaper
+  first step: repair and recheck the nearest stored final path. Rotation about the robot axis and the free start
   time reduce a placement to 3 parameters (axis distance, offset length,
   offset direction relative to the bar) + spin direction; precompute, refine
   the nearest online.
@@ -307,9 +529,13 @@ All run from the repo root (`uv run python Prokop/experiments/<script>`).
 | `validate_soft_collision.py` | the soft model vs the exact meshes |
 | `show_plan.py` | perception → plan → run in the viewer (standalone simulator) |
 | `reachability.py` | the 25-placement sweep (section 8) |
-| `spin_plan.py [--seed N] [--tracker fitted\|truth]` | spinning: perception, plan, executor, evaluation |
+| `spin_plan.py [--seed N \| --axis X Y] [--tracker fitted\|truth]` | spinning: perception, plan, executor, evaluation |
 | `spacetime_plan.py [YAW SPEED AXIS OFFSET START]` | the space-time tree on a model, with rejection tallies |
 | `follow_bar.py [SPEED]` | following the top bar step by step, frozen vs turning |
 | `checkpoint_timeline.py [START_OFFSET]` | free poses per checkpoint against the clock |
 | `first_spin_move.py` | the first spinning move traced |
+| `backward_plan.py [YAW SPEED AXIS OFFSET [N]]` | the backward planner on a model, per end angle, with rejection tallies |
+| `execution_replay.py RUN/execution.pkl` | a simulated execution offline: tracker frame by frame (re-rendered), stamp lateness, step timing |
+| `profile_breakdown.py RUN.prof` | where a profiled planning run's time goes, by planner block |
+| `spin_sanity.py AX AY OX OY [YAW_DEG [DIR [SPEED]]]` | spinning plan on the true model + exact replay with the puzzle turning |
 | `../run_solver.py --planner copy` | Natka's planner (copy) in the full pipeline |

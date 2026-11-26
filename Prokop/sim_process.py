@@ -57,6 +57,7 @@ def _serve(conn, port: int, sim_kwargs: dict) -> None:
         return (t - robot._t_start) * robot._time_scale
 
     track: list[tuple[float, np.ndarray]] = []  # (time.monotonic(), true q)
+    grab_sent: list[float] = []  # when each grab_image reply was sent (time.monotonic())
     running = True
 
     def record() -> None:
@@ -77,6 +78,10 @@ def _serve(conn, port: int, sim_kwargs: dict) -> None:
                 break
             if kind == "robot":
                 value = getattr(robot, name)(*args, **kwargs)
+                if name == "grab_image":  # the reply's send time, for truth_grabs
+                    conn.send(("ok", value))
+                    grab_sent.append(time.monotonic())
+                    continue
             elif name == "set_placement":
                 value = viewer.set_placement(*args)
             elif name == "set_turntable":  # static angle and spin from now on
@@ -92,6 +97,11 @@ def _serve(conn, port: int, sim_kwargs: dict) -> None:
                 value = float(viewer.turntable_angle(sim_time(args[0])))
             elif name == "truth_track":
                 value = [(t, q) for t, q in list(track) if t >= args[0]]
+            elif name == "truth_grabs":  # grab_image timings, time.monotonic()
+                mono = [tuple(robot._t_start + x / robot._time_scale for x in g)
+                        for g in list(robot.grab_log)]
+                value = [g + (sent,) for g, sent in zip(mono, grab_sent[-len(mono):])
+                         if g[0] >= args[0]] if mono else []
             else:
                 raise ValueError(f"unknown scene request {name}")
             conn.send(("ok", value))
@@ -177,6 +187,11 @@ class SimProcess:
     def truth_angle(self, t: float) -> float:
         """True turntable angle [rad] at time @t [s, time.monotonic()]."""
         return self._link.call("scene", "truth_angle", float(t))
+
+    def truth_grabs(self, since: float = 0.0) -> list[tuple[float, ...]]:
+        """grab_image timings since @since [s, time.monotonic()]: (image time, collision
+        check done, rendered, planned return, real return, reply sent) per call."""
+        return self._link.call("scene", "truth_grabs", float(since))
 
     def truth_track(self, since: float = 0.0) -> list[tuple[float, np.ndarray]]:
         """True arm configurations recorded since @since [s, time.monotonic()]."""
