@@ -493,6 +493,13 @@ agree; the truth needed ≤ 0.15°).
   dimensions, user): angle sd 0.88° (tracker 0.8° one marker + speed sd × 12 s),
   hoop–puzzle **5.5–6.8 mm** (was 3), every configuration **≥ 5.5° from the joint
   limits** (room for the executor's corrections; was none).
+  **Revised 2026-11-26 (user's measurement uncertainties):** every tape-measured
+  dimension (turntable, base, bar, robot position) has a 1 mm rounding, sd 1/√12 mm,
+  four in quadrature inside the k·σ (was +2 mm on top); the speed sd floor from the
+  stopwatch period (T = 28 s read to 0.1 s → sd 0.1/√3 s; the marks to 4° → sd
+  4°/√12): sd_ω = √((σ_θ/T)² + (2π σ_T/T²)²) = **0.049°/s** (was 0.03). Hoop–puzzle
+  4.7–5.8 mm, joint limits 6.0°. Seed 12 (fit residual 2.27 mm, margin 6.8 → 5.8 mm)
+  now succeeds; seed 5 (4.7 mm) still has no plan (spin +1).
 * **What limits now: planning speed.** With the margins and 6 workers sharing the
   CPU with the simulator, one end angle takes 65–91 s (standalone, 3 mm margin:
   23–56 s): plans arrive too late (predicted ends 126–150 s) or not within 98 s.
@@ -730,6 +737,27 @@ per-call overhead, not the arithmetic.
 **Batch 6** (20 seeds, the compiled kernel): **9 successes**, 9 unreachable at perception,
 2 at planning (seeds 5, 12, as in batch 5) — planning median 52 → **35 s**, the run's end
 after the start median 84 → **66 s**, latest 104 → **98 s**.
+
+**Batch 7** (the same 20 placements, **directions flipped**: odd −1, even +1; the revised
+margins): **17 successes**, 1 unreachable at perception (seed 9), 1 at planning (seed
+7), 1 aborted (seed 11: the camera tracker saw no markers for 15 s). Planning 23–47 s,
+threaded at 52–94 s. Every placement seen in both directions succeeded in at least one
+(seed 5: −1 yes, +1 no; seed 7: +1 yes, −1 no). The perception failures of batch 6 were
+mostly the **arc**, not the placement: the base stands at the image edge, the 8 images
+cover ~90° of the turn and the direction picks which 90° (seed 2: a base corner without
+markers in batch 6, the marker in full view flipped). Camera model, 300 placements, every
+start angle, both directions (`fov_wait` in the scratch): 4 images with a whole marker in
+view within 8 s in 85.5 % of the cases, 14 s (half a turn) 94.4 %, 21 s 98.2 %, 28 s
+99.6 %; the first marker can take more than half a turn in 30 of 300 placements (the
+base's offset breaks the two markers' symmetry about the axis).
+
+**Vojtěch's planner** (branch `AdvAruco-SimSolve`, `solver/puzzle_plan.py`; forward beam
+search over roll/tilt at the arrival times, stops at every waypoint, each corrected move
+FCL-checked just before sending, the route also back out; 1 mm clearance): the same 20
+placements and directions as batch 6, the true model (no perception), speed 0.8, one
+process: plans for 13 of 20 in **59–277 s** (median ~120 s), threaded at 12–16 s of the
+traversal, back out at 27–35 s, least clearance 1.0–9.1 mm. Of the 11 seen in batch 6 he
+solves 8 (ours 9); his solve seeds 5 and 12 (ours not), ours 4, 8, 15 (his not).
 
 ## 10. Open ideas (not built yet)
 

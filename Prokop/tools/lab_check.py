@@ -4,7 +4,7 @@ What the solver assumes and nobody has measured on the real station yet (the
 October experiments E1-E9 in docs/EXPERIMENTS.md measured the cell, the turntable
 period, the motion profile, the delays, blending and the camera timing):
 
-    dims        no robot   the model's dimensions, to check with a caliper (+-2 mm
+    dims        no robot   the model's dimensions, to check with a caliper (+-1 mm
                            is what the margins assume)
     calibrate   MOVES      the camera calibration (homography) from the hoop over a
                            grid in the EMPTY work area -> the JSON for run_solver --real
@@ -170,11 +170,12 @@ def cmd_dims(args, log: Log) -> dict:
         ("ring centre in front of the robot axis at q_home", float(mid[0]),
          "robot at q_home: horizontal distance robot axis -> ring centre"),
     ]
-    log("Model dimensions to check (the margins assume +-2 mm):\n")
+    log("Model dimensions to check (the margins assume each right to its 1 mm rounding, "
+        "sd 1/sqrt(12) mm: pass within +-1 mm):\n")
     log(f"  {'what':55s} {'model':>9s}   how")
     for what, value, how in rows:
         log(f"  {what:55s} {1000 * value:7.1f} mm   {how}")
-    log("\nWrite the measured values next to these; differences > 2 mm: tell Prokop (the "
+    log("\nWrite the measured values next to these; differences > 1 mm: tell Prokop (the "
         "soft model / wire.py constants would have to change).")
     return {"rows": [{"what": w, "model_mm": 1000 * v, "how": h} for w, v, h in rows]}
 

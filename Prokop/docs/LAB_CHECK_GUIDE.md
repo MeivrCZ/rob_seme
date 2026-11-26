@@ -95,8 +95,8 @@ The command prints a table: what to measure, the model's value, and how to measu
 it. Measure each item with a caliper or a tape and write the values next to the
 table, in the session notes (see "Recording").
 
-- **Pass:** every item within ±2 mm. The safety margins (`solver/uncertainty.py`, `DIMENSION_TOL`) assume exactly that.
-- **Off by more than 2 mm:** report it.
+- **Pass:** every item within ±1 mm. The safety margins (`solver/uncertainty.py`, `DIMENSION_SD`) assume each dimension is right to its 1 mm rounding (sd 1/√12 mm, four parts in quadrature).
+- **Off by more than 1 mm:** report it.
   - The puzzle's numbers are constants in `Prokop/solver/wire.py` (`BAR_HALF`, `TOP_Z`, `OPEN_END_X`, `ARC_RADIUS`, `JOG_*`).
   - The hoop's numbers are `RING_*` in the same file.
   - The marker height is `MARKER_HEIGHT_ABOVE_TABLE_M` in Vojtěch's `Homografy/turntable_orbit.py`. That one isn't ours to change: tell Prokop.
