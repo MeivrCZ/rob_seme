@@ -76,7 +76,8 @@ from solver.hoop_pose import (FACE_NAMES, FACES, ROLL_STEP, TILT_DIRECTION_STEP,
                               ring_in_flange)
 from solver.soft_collision import SoftClearance, SoftScene
 from solver.wire import (SEGMENT_NAMES, SUCCESS_HEIGHT, checkpoint_arclengths,
-                         ring_top_above_pad, segment_of, wire_frame_at, wire_path)
+                         end_pose_ok, ring_top_above_pad, segment_of, wire_frame_at,
+                         wire_path)
 
 SLACK = 1.15  # safety factor on the motion bound (the lever arms change during a step)
 MAX_JOINT_STEP = np.deg2rad(5.0)  # rad, largest joint change between two samples
@@ -348,8 +349,7 @@ def _plan_face(kin, timing, model: TurntableModel, theta_start: float, tier: int
         qs, rs = candidates(kin, model.checkpoint_T(path, i, angle(t)), orientations, face)
         if i == n - 1:  # the end: the whole ring lower than SUCCESS_HEIGHT above the pad
             to_puzzle = np.linalg.inv(model.puzzle_T(angle(t)))
-            keep = [ring_top_above_pad(to_puzzle @ kin.fk(q) @ ring_in_flange())
-                    < SUCCESS_HEIGHT for q in qs]
+            keep = [end_pose_ok(to_puzzle @ kin.fk(q) @ ring_in_flange()) for q in qs]
             qs, rs = qs[keep], rs[keep]
         return qs, rs
 
@@ -835,8 +835,7 @@ def _checkpoint_candidates(kin, model: TurntableModel, path: PuzzlePath, i: int,
     qs, os_ = candidates(kin, model.checkpoint_T(path, i, theta), orientations, face)
     if i == len(path.frames) - 1:
         to_puzzle = np.linalg.inv(model.puzzle_T(theta))
-        keep = [ring_top_above_pad(to_puzzle @ kin.fk(q) @ ring_in_flange()) < SUCCESS_HEIGHT
-                for q in qs]
+        keep = [end_pose_ok(to_puzzle @ kin.fk(q) @ ring_in_flange()) for q in qs]
         qs, os_ = qs[keep], os_[keep]
     return qs, os_
 
@@ -1160,7 +1159,7 @@ def plan_spacetime(kin, timing, model: TurntableModel, theta_start: float,
         if np.linalg.norm(ring[:3, 3] - (P @ path.frames[k])[:3, 3]) > ST_AT_CHECKPOINT:
             return False
         if k == n - 1:
-            return ring_top_above_pad(np.linalg.inv(P) @ ring) < SUCCESS_HEIGHT
+            return end_pose_ok(np.linalg.inv(P) @ ring)
         return True
 
     def reach(k: int, orient: np.ndarray, q0: np.ndarray, t0: float,
@@ -1800,7 +1799,8 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
                 return None
             return earlier + later[1:]
 
-        # The roots: free final configurations with the ring low enough, most clearance first.
+        # The roots: free final configurations with the ring low enough (and not too
+        # low: end_pose_ok), most clearance first.
         final = model.checkpoint_T(path, n - 1, angle(0.0))
         roots = []
         for o in grid:
@@ -1808,8 +1808,7 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
                 if not in_room(q):
                     continue
                 ring = kin.fk(q) @ to_ring
-                if ring_top_above_pad(np.linalg.inv(model.puzzle_T(angle(0.0))) @ ring) \
-                        >= SUCCESS_HEIGHT:
+                if not end_pose_ok(np.linalg.inv(model.puzzle_T(angle(0.0))) @ ring):
                     continue
                 c = scene.clearance(q, angle(0.0))
                 if c.free:

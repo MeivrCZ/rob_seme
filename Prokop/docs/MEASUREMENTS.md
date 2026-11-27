@@ -58,7 +58,7 @@ measured; *decided* = a team choice.
 |---|---|---|---|---|
 | Turntable | cylinder Ø 137 mm, 34 mm high | measured (tape) | E2 | `models/turntable.urdf` |
 | Period at the slowest speed | **28.0 s/rev**, the same both ways: CW 28.00 ± 0.05 s (5 turns), CCW 28.06 ± 0.02 s (4 turns) | measured (stopwatch) | E3 | `view_models.SPIN_PERIOD` |
-| Base on its foam | 30 mm total: 5 mm printed plate (+0.6 mm marker relief) on 25 mm foam with the base footprint (125 × 125 mm) | measured (tape) | E2 | `placement.BASE_FOAM`, `models/base.urdf` |
+| Base on its foam | 5 mm printed plate (+0.6 mm marker relief) on the foam with the base footprint (125 × 125 mm); foam 25 mm by tape (E2), **27.4 mm** since the lab of 2026-11-27 measured the marker plane 67.0 mm above the table (model 64.6 mm): the 2.4 mm difference is put into the foam | measured (tape, then caliper) | E2, lab 2026-11-27 | `placement.BASE_FOAM`, `models/base.urdf` |
 | Densities for the tip-over check | PETG 1270 kg/m³ × 0.5 fill; foam 30 kg/m³; magnets 10 × 3 mm NdFeB | assumed | print settings of the hardware repo | `placement.PRINT_DENSITY`, `FOAM_DENSITY`, `MAGNET_MASS` |
 
 ## Motion and serial line of the control unit

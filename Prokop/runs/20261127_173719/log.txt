@@ -1,0 +1,99 @@
+Run folder: /home/ekovar32/Coding/School/CRS97/Prokop/runs/20261127_173719
+Time: the simulator took 11.3 s to start (not counted in the 120 s); 2.9 s before it (imports)
+Simulator: http://localhost:8080; placement seed 0: turntable [0.538 0.071], base offset [0.019 0.019], yaw +221.54 deg, spin +1
+
+=== Phase 1: turntable model ===
+P1.2: 29 images, 1.0 s apart
+  frame 00: 1 marker(s), xy [0.5485 0.0956], yaw -115.29 deg | truth error 0.9 mm, +1.05 deg
+  frame 01: 2 marker(s), xy [0.5425 0.0976], yaw -102.52 deg | truth error 1.1 mm, +2.22 deg
+  frame 02: 2 marker(s), xy [0.5366 0.0979], yaw -89.54 deg | truth error 1.4 mm, +2.64 deg
+  frame 03: 2 marker(s), xy [0.5308 0.0969], yaw -76.66 deg | truth error 0.3 mm, +0.18 deg
+  frame 04: 2 marker(s), xy [0.5253 0.0946], yaw -63.78 deg | truth error 0.3 mm, +0.21 deg
+  frame 05: 2 marker(s), xy [0.5206 0.0911], yaw -50.85 deg | truth error 0.3 mm, +0.01 deg
+  frame 06: 2 marker(s), xy [0.5166 0.0867], yaw -38.19 deg | truth error 0.3 mm, +0.36 deg
+  frame 07: 2 marker(s), xy [0.5138 0.0814], yaw -25.43 deg | truth error 0.4 mm, +0.67 deg
+  frame 08: 2 marker(s), xy [0.5122 0.0758], yaw -12.46 deg | truth error 0.5 mm, +0.70 deg
+  frame 09: 2 marker(s), xy [0.5119 0.0698], yaw +0.42 deg | truth error 0.4 mm, +0.54 deg
+  frame 10: 2 marker(s), xy [0.5129 0.064 ], yaw +13.37 deg | truth error 0.4 mm, +0.56 deg
+  frame 11: 2 marker(s), xy [0.5152 0.0586], yaw +26.26 deg | truth error 0.7 mm, +1.15 deg
+  frame 12: 2 marker(s), xy [0.5187 0.0537], yaw +39.05 deg | truth error 0.1 mm, +0.09 deg
+  frame 13: 2 marker(s), xy [0.5232 0.0498], yaw +51.81 deg | truth error 0.1 mm, +0.19 deg
+  frame 14: 2 marker(s), xy [0.5284 0.047 ], yaw +64.64 deg | truth error 0.1 mm, +0.19 deg
+  frame 15: 2 marker(s), xy [0.5341 0.0454], yaw +77.51 deg | truth error 0.1 mm, +0.19 deg
+  frame 16: 2 marker(s), xy [0.54   0.0451], yaw +90.42 deg | truth error 0.1 mm, +0.16 deg
+  frame 17: 2 marker(s), xy [0.546  0.0462], yaw +103.18 deg | truth error 0.2 mm, +0.29 deg
+  frame 18: 2 marker(s), xy [0.5518 0.0487], yaw +116.07 deg | truth error 0.5 mm, +0.46 deg
+  frame 19: 2 marker(s), xy [0.5567 0.0524], yaw +128.93 deg | truth error 0.8 mm, +0.46 deg
+  frame 20: 2 marker(s), xy [0.5605 0.057 ], yaw +141.70 deg | truth error 0.9 mm, +0.35 deg
+  frame 21: 2 marker(s), xy [0.5631 0.0622], yaw +154.55 deg | truth error 0.8 mm, +0.33 deg
+  frame 22: 2 marker(s), xy [0.5645 0.0677], yaw +167.44 deg | truth error 0.5 mm, +0.29 deg
+  frame 23: 1 marker(s), xy [0.5647 0.0728], yaw -179.56 deg | truth error 0.4 mm, +0.15 deg
+  frame 24: 1 marker(s), xy [0.5637 0.0787], yaw -166.59 deg | truth error 0.4 mm, +0.22 deg
+  frame 25: 1 marker(s), xy [0.5613 0.0842], yaw -153.75 deg | truth error 0.3 mm, +0.07 deg
+  frame 26: 1 marker(s), xy [0.558 0.089], yaw -140.97 deg | truth error 0.4 mm, +0.15 deg
+  frame 27: 1 marker(s), xy [0.5537 0.093 ], yaw -128.17 deg | truth error 0.5 mm, +0.31 deg
+  frame 28: 1 marker(s), xy [0.5485 0.0956], yaw -115.29 deg | truth error 0.6 mm, +0.27 deg
+P1.2 vs truth: xy error max 1.4 mm, yaw error max +2.64 deg
+P1.3: fit_orbit
+  axis [0.5385 0.0716], offset [0.0098 0.0246] (r = 26.5 mm), base_yaw -115.09 deg, direction +1, period 27.95 s; residuals 0.4 mm, +0.52 deg
+  truth: axis [0.5382 0.0714], offset r = 26.4 mm, direction +1
+  puzzle pose error at now+0 s: 0.4 mm, 0.06 deg
+  puzzle pose error at now+10 s: 0.3 mm, 0.19 deg
+  puzzle pose error at now+30 s: 0.3 mm, 0.68 deg
+(Phase 1: turntable model: 29.9 s)
+
+=== Phase 2: plan ===
+P2: margins from the uncertainties: hoop-puzzle 4.1 mm, joint limits 6.0 deg (k = 2: angle sd 0.99 deg incl. speed sd 0.049 deg/s over 12 s, position sd 0.42 mm, reach 110 mm, dimensions sd 0.58 mm)
+P2: reachability map (97 ms): checkpoints reachable in 76, 87, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 74 %
+P2: backwards in time from 6 end angles (+122.83 deg, +152.83 deg, +92.83 deg, -177.17 deg, +62.83 deg, -147.17 deg), 6 processes, speed 0.5
+  time: 34.1 s used, planning may take up to 72.9 s (a plan counts only if it is predicted to end within 120 s)
+  end angle +92.83 deg: collision free (18 s); score: Jacobian sigma_min 48.4 mm, joint-limit margin 17.6 deg
+  plan in 43 s: start angle +22.37 deg, 7 waypoints, side B, entry 15.0 mm, traversal 5.6 s, tilts [20, 20, 20, 20, 20, 20, 0] deg, least soft clearance 2.6 mm
+  predicted end 95.9 s after the start (limit 120 s)
+  chosen from 1 plan(s): the soonest end (then the farthest from singularities): end angle +92.83 deg
+  WARNING: no final pose stays clear of the turning puzzle: after the end the puzzle will hit the arm (harmless: hollow puzzle on foam, magnetic hoop)
+P2: approach q_home -> the waiting pose, clear of the swept volume
+  through a pre-pre-entry pose 5 cm back: ring gap 32.0 mm, then 5.3 mm soft clearance into the waiting pose
+(Phase 2: plan: 43.6 s)
+
+=== Phase 3: execution ===
+P3.1: tracker = CameraPhaseTracker (Vojtech): measures the base while it works
+--> FAILED with an exception:
+Traceback (most recent call last):
+  File "/home/ekovar32/Coding/School/CRS97/Vojtěch/ArucoFinder/camera_phase_tracker.py", line 91, in _run
+    image = self._grab_image()
+            ^^^^^^^^^^^^^^^^^^
+  File "/home/ekovar32/Coding/School/CRS97/Prokop/sim_process.py", line 151, in <lambda>
+    return lambda *args, **kwargs: link.call("robot", name, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ekovar32/Coding/School/CRS97/Prokop/run_solver.py", line 562, in timed
+    return inner(kind, name, *a, **k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ekovar32/Coding/School/CRS97/Prokop/sim_process.py", line 127, in call
+    self._conn.send((kind, name, args, kwargs))
+  File "/usr/lib/python3.12/multiprocessing/connection.py", line 206, in send
+    self._send_bytes(_ForkingPickler.dumps(obj))
+  File "/usr/lib/python3.12/multiprocessing/connection.py", line 427, in _send_bytes
+    self._send(header + buf)
+  File "/usr/lib/python3.12/multiprocessing/connection.py", line 384, in _send
+    n = write(self._handle, buf)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/ekovar32/Coding/School/CRS97/Prokop/run_solver.py", line 208, in phase
+    yield record
+  File "/home/ekovar32/Coding/School/CRS97/Prokop/run_solver.py", line 899, in main
+    phase3_execute(robot, model, plan, path, log, truth, rec, args.tracker,
+  File "/home/ekovar32/Coding/School/CRS97/Prokop/run_solver.py", line 700, in phase3_execute
+    if not camera.wait_ready(timeout=15.0):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ekovar32/Coding/School/CRS97/Vojtěch/ArucoFinder/camera_phase_tracker.py", line 75, in wait_ready
+    raise RuntimeError(f"Sledování točny selhalo: {self._error}") from self._error
+RuntimeError: Sledování točny selhalo: [Errno 32] Broken pipe
+
+(Phase 3: execution: 0.1 s)
+
+=== Result: stopped: RuntimeError: Sledování točny selhalo: [Errno 32] Broken pipe ===

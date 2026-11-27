@@ -1,0 +1,144 @@
+{
+  "args": {
+    "seed": "0",
+    "direction": "1",
+    "axis": "None",
+    "offset": "(0.02, 0.0)",
+    "yaw": "0.0",
+    "speed": "0.5",
+    "tracker": "camera",
+    "frames": "29",
+    "interval": "1.0",
+    "pre_entry": "0.0",
+    "continuity": "[0.5, 2.0, 20.0]",
+    "margin_floor": "0.0",
+    "rank": "closest",
+    "speed_cap": "False",
+    "phases": "6",
+    "planner": "prokop",
+    "stop_after": "3",
+    "calibration": "None",
+    "port": "8080",
+    "hold": "False",
+    "real": "False"
+  },
+  "placement": {
+    "turntable_xy": [
+      0.538187324408089,
+      0.07138691311351131
+    ],
+    "base_xy": [
+      0.018752828171328288,
+      0.01858468476746816
+    ],
+    "base_yaw": 3.8665786907160857
+  },
+  "phases": {
+    "Phase 1: turntable model": {
+      "detections": "29/29",
+      "measurement_error": {
+        "xy_max_mm": 1.3762338435799861,
+        "yaw_max_deg": 2.635802909689316
+      },
+      "model": {
+        "axis_xy": [
+          0.5384633558446907,
+          0.07160116752379644
+        ],
+        "base_offset": [
+          0.009781200203992695,
+          0.024602870817394318
+        ],
+        "base_yaw": -2.0087088595117866,
+        "direction": 1,
+        "omega": 0.22483064886002596,
+        "period_s": 27.94630242379162
+      },
+      "model_error": {
+        "+0s": {
+          "pos_mm": 0.385193308406036,
+          "rot_deg": 0.06083531321683039
+        },
+        "+10s": {
+          "pos_mm": 0.27187354811970615,
+          "rot_deg": 0.18620896401472511
+        },
+        "+30s": {
+          "pos_mm": 0.2681569807362142,
+          "rot_deg": 0.6802975185051034
+        }
+      },
+      "fit_for_margins": {
+        "xy_rmse_m": 0.00041869752095524123,
+        "yaw_rmse_rad": 0.009124033138680529,
+        "times": [
+          3714.013124653,
+          3715.097490755,
+          3716.1392835789998,
+          3716.9495194749998,
+          3717.954401689,
+          3718.9443062319997,
+          3719.955831713,
+          3720.9726409679997,
+          3721.98405374,
+          3722.973742053,
+          3723.982157287,
+          3725.031072938,
+          3725.943057207,
+          3726.9432929,
+          3727.94132878,
+          3728.942534084,
+          3729.944347184,
+          3730.946350854,
+          3731.9620444449997,
+          3732.962678428,
+          3733.946961571,
+          3734.944793088,
+          3735.944583058,
+          3736.944882061,
+          3737.958619652,
+          3738.945654262,
+          3739.945954665,
+          3740.953710273,
+          3741.952436884
+        ]
+      },
+      "ok": true,
+      "seconds": 29.95
+    },
+    "Phase 2: plan": {
+      "margins": {
+        "hoop_puzzle_mm": 4.062828006866449,
+        "joint_limit_deg": 5.972114377516292,
+        "sd_angle_deg": 0.9930285943790729
+      },
+      "reachability": "checkpoints reachable in 76, 87, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 74 %",
+      "plan": {
+        "seconds": 42.5,
+        "theta_start": 0.3904230986284316,
+        "waypoints": 7,
+        "traversal_s": 5.589837940602,
+        "entry_mm": 15.0,
+        "soft_clearance_mm": 2.6000001368369356,
+        "end_pose_waits": false,
+        "predicted_end_s": 95.9,
+        "candidates": [
+          {
+            "end_angle_deg": 92.83121279963693,
+            "sigma_min_mm": 48.448434128230645,
+            "limit_margin_deg": 17.61698955333844
+          }
+        ]
+      },
+      "approach": "through a pre-pre-entry pose 5 cm back: ring gap 32.0 mm, then 5.3 mm soft clearance into the waiting pose",
+      "ok": true,
+      "seconds": 43.6
+    },
+    "Phase 3: execution": {
+      "ok": false,
+      "reason": "RuntimeError: Sledov\u00e1n\u00ed to\u010dny selhalo: [Errno 32] Broken pipe",
+      "seconds": 0.12
+    }
+  },
+  "result": "stopped: RuntimeError: Sledov\u00e1n\u00ed to\u010dny selhalo: [Errno 32] Broken pipe"
+}

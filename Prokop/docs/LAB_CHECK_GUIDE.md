@@ -13,7 +13,7 @@ bent square bar (the "puzzle") that stands on a base on a **spinning turntable**
 (28 s per turn). The camera above the work area sees ArUco markers on the base. The
 pipeline is `Prokop/run_solver.py`:
 
-1. **perception**: about 8 images, `fit_orbit` gives the turntable's axis, the base's offset, its direction and speed;
+1. **perception**: a whole turn of images (29, 1 s apart), `fit_orbit` gives the turntable's axis, the base's offset, its direction and speed;
 2. **planning**: `solver/planner.py` plans backwards in time from several end angles in parallel;
 3. **execution**: `solver/executor.py` queues the moves. Vojtěch's camera tracker keeps correcting the phase until 0.5 s before the start.
 

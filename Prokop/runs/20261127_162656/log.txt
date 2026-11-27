@@ -1,0 +1,45 @@
+Run folder: /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/runs/20261127_162656
+
+=== Phase 1: turntable model ===
+P1.2: 8 images, 1.0 s apart
+  frame 00: no markers
+  frame 01: 1 marker(s), xy [ 0.6166 -0.1671], yaw -91.60 deg
+  frame 02: 1 marker(s), xy [ 0.62   -0.1697], yaw -103.94 deg
+  frame 03: 1 marker(s), xy [ 0.623  -0.1735], yaw -116.43 deg
+  frame 04: 1 marker(s), xy [ 0.6257 -0.1776], yaw -129.28 deg
+  frame 05: 1 marker(s), xy [ 0.626  -0.1821], yaw -141.55 deg
+  frame 06: 1 marker(s), xy [ 0.6261 -0.187 ], yaw -154.65 deg
+  frame 07: 1 marker(s), xy [ 0.6253 -0.1912], yaw -167.14 deg
+P1.3: fit_orbit
+  axis [ 0.6052 -0.1848], offset [ 0.0201 -0.0066] (r = 21.2 mm), base_yaw -167.06 deg, direction -1, period 28.54 s; residuals 0.3 mm, +0.18 deg
+(Phase 1: turntable model: 8.2 s)
+
+=== Phase 2: plan ===
+P2: margins from the uncertainties: hoop-puzzle 4.0 mm, joint limits 6.0 deg (k = 2: angle sd 0.99 deg incl. speed sd 0.049 deg/s over 12 s, position sd 0.28 mm, reach 109 mm, dimensions sd 0.58 mm)
+P2: reachability map (35 ms): checkpoints reachable in 73, 76, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 66 %
+P2: backwards in time from 6 end angles (+149.10 deg, +179.10 deg, +119.10 deg, -150.90 deg, +89.10 deg, -120.90 deg), 6 processes, speed 0.5
+  time: 10.0 s used, planning may take up to 97.0 s (a plan counts only if it is predicted to end within 120 s)
+  end angle +179.10 deg: collision free (4 s); score: Jacobian sigma_min 51.2 mm, joint-limit margin 10.5 deg
+  end angle +149.10 deg: collision free (5 s); score: Jacobian sigma_min 41.6 mm, joint-limit margin 10.9 deg
+  end angle -150.90 deg: collision free (5 s); score: Jacobian sigma_min 24.2 mm, joint-limit margin 10.5 deg
+  end angle -120.90 deg: collision free (5 s); score: Jacobian sigma_min 27.4 mm, joint-limit margin 12.0 deg
+  end angle +119.10 deg: collision free (17 s); score: Jacobian sigma_min 52.1 mm, joint-limit margin 10.1 deg
+  plan in 22 s: start angle +239.73 deg, 7 waypoints, side B, entry 15.0 mm, traversal 4.9 s, tilts [20, 20, 20, 20, 20, 20, 0] deg, least soft clearance 5.8 mm
+  predicted end 52.5 s after the start (limit 120 s)
+  chosen from 5 plan(s): the soonest end (then the farthest from singularities): end angle +179.10 deg
+  WARNING: no final pose stays clear of the turning puzzle: after the end the puzzle will hit the arm (harmless: hollow puzzle on foam, magnetic hoop)
+P2: approach q_home -> the waiting pose, clear of the swept volume
+  through a pre-pre-entry pose 5 cm outward and up: ring gap 14.4 mm, then 2.0 mm soft clearance into the waiting pose
+(Phase 2: plan: 21.8 s)
+
+=== Phase 3: execution ===
+P3.1: tracker = CameraPhaseTracker (Vojtech): measures the base while it works
+  camera tracker ready
+Waiting 6.2 s for the turntable phase
+camera tracker: lost aruco, believing model
+camera tracker stopped for the traversal: the fitted model from its last angle (4.80 s old)
+Traversal done in 4.9 s, 6 steps
+Time: the traversal ended 51.9 s after the start (within the 120 s limit)
+(Phase 3: execution: 20.3 s)
+
+=== Result: all phases ran ===

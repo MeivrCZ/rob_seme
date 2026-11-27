@@ -292,3 +292,21 @@ What changed that you may run into:
   (we changed the step loop), `simulation.py`, `contracts.py`, `timing.py`, and
   `solver/puzzle_plan.py` imports `solver.feasibility` and `solver.ik_batch`,
   which were removed on 2026-11-24 (superseded). Let's talk before merging.
+
+## Vojtěch: the marker height measured (2026-11-27)
+
+At the lab the base's marker plane was measured 67.0 mm above the table; your
+`MARKER_HEIGHT_ABOVE_TABLE_M` (`Homografy/turntable_orbit.py`) is 64.6 mm. Prokop's
+model now has the base 2.4 mm higher (`placement.BASE_FOAM` 27.4 mm). Please check and
+update your constant if you agree (the effect on the measured xy is small, a parallax of
+well under 1 mm in the work area).
+
+## Everyone: the solver after the lab (2026-11-27)
+
+- Perception watches a whole turn (29 images, 1 s apart): the 8-image fits gave
+  periods of 25.2-28.8 s, and every run without a plan had only 4-5 detections and
+  margins of 10-20 mm.
+- The end pose keeps the ring's lowest point at least 15 mm above the pad
+  (`solver/wire.py` `END_MIN_BOTTOM`), and the hoop keeps 15 mm from the base and the
+  puzzle's foot in the soft model (`HOOP_BASE_MARGIN`): the real end poses came within
+  a few mm of the base.

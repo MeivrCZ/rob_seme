@@ -1,0 +1,17 @@
+Run folder: /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/runs/20261127_155320
+
+=== Phase 1: turntable model ===
+P1.2: 8 images, 1.0 s apart
+  frame 00: 2 marker(s), xy [ 0.4936 -0.1438], yaw -68.28 deg
+  frame 01: 2 marker(s), xy [ 0.4915 -0.142 ], yaw -81.18 deg
+  frame 02: 2 marker(s), xy [ 0.4899 -0.1399], yaw -93.83 deg
+  frame 03: 2 marker(s), xy [ 0.4887 -0.1373], yaw -106.73 deg
+  frame 04: 2 marker(s), xy [ 0.4882 -0.1346], yaw -119.11 deg
+  frame 05: 2 marker(s), xy [ 0.4882 -0.1321], yaw -131.45 deg
+  frame 06: 2 marker(s), xy [ 0.4889 -0.1294], yaw -144.18 deg
+  frame 07: 2 marker(s), xy [ 0.4905 -0.1267], yaw -156.86 deg
+P1.3: fit_orbit
+  axis [ 0.5007 -0.1337], offset [-0.0104  0.0068] (r = 12.4 mm), base_yaw -156.88 deg, direction -1, period 28.53 s; residuals 0.1 mm, +0.16 deg
+(Phase 1: turntable model: 8.2 s)
+
+=== Result: all phases ran ===

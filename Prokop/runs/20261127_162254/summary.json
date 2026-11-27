@@ -1,0 +1,68 @@
+{
+  "args": {
+    "seed": "0",
+    "direction": "1",
+    "axis": "None",
+    "offset": "(0.02, 0.0)",
+    "yaw": "0.0",
+    "speed": "0.5",
+    "tracker": "camera",
+    "frames": "8",
+    "interval": "1.0",
+    "pre_entry": "0.0",
+    "continuity": "[0.5, 2.0, 20.0]",
+    "margin_floor": "0.0",
+    "rank": "closest",
+    "speed_cap": "False",
+    "phases": "6",
+    "planner": "prokop",
+    "stop_after": "3",
+    "calibration": "Prokop/data/calibration/homography_20261127_154349.json",
+    "port": "8080",
+    "hold": "False",
+    "real": "True"
+  },
+  "phases": {
+    "Phase 1: turntable model": {
+      "detections": "4/8",
+      "model": {
+        "axis_xy": [
+          0.6057466080121203,
+          -0.18566550934609657
+        ],
+        "base_offset": [
+          -0.017985229706820077,
+          -0.009004647568669144
+        ],
+        "base_yaw": 0.9408497525100353,
+        "direction": -1,
+        "omega": 0.2211911106562596,
+        "period_s": 28.4061384227322
+      },
+      "fit_for_margins": {
+        "xy_rmse_m": 0.0006476136454381728,
+        "yaw_rmse_rad": 0.026786627498168503,
+        "times": [
+          6258.395006803,
+          6259.395003691,
+          6260.395475771001,
+          6265.394911188
+        ]
+      },
+      "ok": true,
+      "seconds": 8.19
+    },
+    "Phase 2: plan": {
+      "margins": {
+        "hoop_puzzle_mm": 13.338199860916967,
+        "joint_limit_deg": 16.049490048263145,
+        "sd_angle_deg": 3.5123725120657867
+      },
+      "reachability": "checkpoints reachable in 73, 76, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 66 %",
+      "ok": false,
+      "reason": "no plan that ends within 120 s (44 s of planning)",
+      "seconds": 44.33
+    }
+  },
+  "result": "stopped: no plan that ends within 120 s (44 s of planning)"
+}

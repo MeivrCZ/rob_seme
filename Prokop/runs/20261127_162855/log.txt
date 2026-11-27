@@ -1,0 +1,31 @@
+Run folder: /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/runs/20261127_162855
+
+=== Phase 1: turntable model ===
+P1.2: 8 images, 1.0 s apart
+  frame 00: no markers
+  frame 01: no markers
+  frame 02: no markers
+  frame 03: no markers
+  frame 04: 1 marker(s), xy [0.3692 0.0063], yaw +119.49 deg
+  frame 05: 1 marker(s), xy [ 3.715e-01 -3.000e-04], yaw +106.82 deg
+  frame 06: 1 marker(s), xy [ 0.3727 -0.0101], yaw +95.23 deg
+  frame 07: 1 marker(s), xy [ 0.3718 -0.0178], yaw +81.19 deg
+P1.3: fit_orbit
+  axis [ 0.3346 -0.0095], offset [ 0.0371 -0.0084] (r = 38.1 mm), base_yaw +81.71 deg, direction -1, period 28.46 s; residuals 0.6 mm, +0.52 deg
+(Phase 1: turntable model: 8.2 s)
+
+=== Phase 2: plan ===
+P2: margins from the uncertainties: hoop-puzzle 12.3 mm, joint limits 13.6 deg (k = 2: angle sd 2.91 deg incl. speed sd 0.233 deg/s over 12 s, position sd 0.61 mm, reach 120 mm, dimensions sd 0.58 mm)
+P2: reachability map (37 ms): checkpoints reachable in 84, 100, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 84 %
+P2: backwards in time from 6 end angles (-76.82 deg, -46.82 deg, -106.82 deg, -16.82 deg, -136.82 deg, +13.18 deg), 6 processes, speed 0.5
+  time: 10.0 s used, planning may take up to 97.0 s (a plan counts only if it is predicted to end within 120 s)
+  end angle -106.82 deg: backwards from end angle -107 deg: no way back to a waiting pose (17 final configurations) (9 s)
+  end angle -16.82 deg: backwards from end angle -17 deg: no way back to a waiting pose (30 final configurations) (16 s)
+  end angle -76.82 deg: backwards from end angle -77 deg: no way back to a waiting pose (41 final configurations) (18 s)
+  end angle -136.82 deg: backwards from end angle -137 deg: no way back to a waiting pose (15 final configurations) (10 s)
+  end angle -46.82 deg: backwards from end angle -47 deg: no way back to a waiting pose (30 final configurations) (22 s)
+  end angle +13.18 deg: backwards from end angle 13 deg: no way back to a waiting pose (27 final configurations) (16 s)
+--> FAILED: no plan that ends within 120 s (33 s of planning)
+(Phase 2: plan: 33.1 s)
+
+=== Result: stopped: no plan that ends within 120 s (33 s of planning) ===

@@ -24,7 +24,8 @@ result is a lower bound either way (an enclosing box contains its children).
 
 Margins are subtracted from the distances: MARGIN for the arm against
 everything, HOOP_PUZZLE_MARGIN (smaller: the ring has ~23 mm around the bar)
-for the hoop against the puzzle, SELF_MARGIN between arm parts. Joint
+for the hoop against the puzzle, HOOP_BASE_MARGIN (larger) for the hoop against
+the base and the puzzle's foot, SELF_MARGIN between arm parts. Joint
 neighbours are never checked against each other (their boxes overlap by
 construction; the joint limits keep them apart), nor the pairs in
 SELF_EXCLUDED (cannot touch within the joint limits), nor the robot's base
@@ -54,6 +55,11 @@ from solver.contracts import TurntableModel, _fixed_frames
 MODELS = Path(__file__).resolve().parents[1] / "models" / "soft"
 MARGIN = 0.010  # m, arm against the cell, table and task
 HOOP_PUZZLE_MARGIN = 0.003  # m, hoop against the puzzle
+# The hoop against the base and the puzzle's foot on it (user, 2026-11-27: the real end
+# poses came within a few mm of the base, the base may count as the puzzle; the lab
+# measured the base 2.4 mm higher than modelled, now in placement.BASE_FOAM).
+HOOP_BASE_MARGIN = 0.015  # m
+HOOP_BASE_OBSTACLES = ("puzzle_foot",)  # puzzle boxes on the base that get it too
 SELF_MARGIN = 0.0  # m, between arm parts (the boxes are already larger)
 REFINE = 0.02  # m, pairs closer than this (margin subtracted) are refined
 # Non-neighbouring parts that cannot touch within the joint limits, not checked
@@ -371,12 +377,14 @@ class SoftScene:
 
     def __init__(self, model: TurntableModel, margin: float = MARGIN,
                  hoop_puzzle_margin: float = HOOP_PUZZLE_MARGIN,
+                 hoop_base_margin: float = HOOP_BASE_MARGIN,
                  self_margin: float = SELF_MARGIN, restricted: bool = False,
                  analytic_ring: bool = False) -> None:
         data = _data()
         self.model = model
         self.table_z = data["table_z"]
         self.margin, self.hoop_puzzle_margin = margin, hoop_puzzle_margin
+        self.hoop_base_margin = hoop_base_margin
         self.self_margin = self_margin
         # --- the arm: leaves, then per part its groups and its root ---
         arm = self.arm = _Tree()
@@ -420,11 +428,17 @@ class SoftScene:
         puzzle = [obs.add(b["T"], b["half"], 2, b["name"], "puzzle") for b in data["puzzle"]]
         self._obs_leaves = np.arange(len(obs.name))
         bend = [k for k in puzzle if obs.name[k].startswith("puzzle_bend")]
-        rest = [k for k in puzzle if k not in bend]
+        # The foot (HOOP_BASE_OBSTACLES) is a root of its own: a group's margin is that
+        # of its leaves, so the foot (base margin) must not share one with the bar.
+        own = [k for k in puzzle if obs.name[k] in HOOP_BASE_OBSTACLES]
+        rest = [k for k in puzzle if k not in bend and k not in own]
         roots.append(obs.group(rest + [obs.group(bend, "puzzle_bend")], "puzzle"))
+        roots += own
         obs.freeze()
         self._obs_roots = np.array(roots)
-        self._obs_is_puzzle = np.array(obs.tag) == "puzzle"
+        self._obs_is_base = (np.array(obs.tag) == "base") | np.isin(
+            np.array(obs.name), HOOP_BASE_OBSTACLES)
+        self._obs_is_puzzle = (np.array(obs.tag) == "puzzle") & ~self._obs_is_base
         # analytic_ring: the ring against the bar (the wire's square bar) computed in closed
         # form per centreline point (point - circle), not with the ring's and the bar's
         # boxes; the handle, the foot and the base stay boxes (see ring_bar_distance).
@@ -679,8 +693,10 @@ class SoftScene:
         np.minimum.at(part_gaps, self._arm_part[tb], table)
 
         def env_margin(i, j):
-            return np.where(self._arm_is_hoop[i] & self._obs_is_puzzle[j],
-                            self.hoop_puzzle_margin, self.margin)
+            hoop = self._arm_is_hoop[i]
+            return np.where(hoop & self._obs_is_puzzle[j], self.hoop_puzzle_margin,
+                            np.where(hoop & self._obs_is_base[j], self.hoop_base_margin,
+                                     self.margin))
 
         skip = None
         if self.analytic_ring:

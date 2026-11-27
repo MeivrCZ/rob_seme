@@ -414,7 +414,7 @@ def report(data: dict) -> str:
         rec = data["steps"].get(str(n))
         if not rec:
             res = "not run"
-        elif rec.get("skipped"):
+        elif rec.get("skipped") and not rec.get("rows"):
             res = f"skipped ({rec['skipped']})"
         else:
             v = rec.get("verdict")
@@ -503,7 +503,8 @@ def main() -> None:
         if choice == "q":
             break
         if choice == "s":
-            sess.step(n).setdefault("skipped", "by the operator")
+            if not sess.step(n).get("rows"):  # keep an earlier result (e.g. on --resume)
+                sess.step(n).setdefault("skipped", "by the operator")
             sess.save()
             continue
         sess.step(n).pop("skipped", None)

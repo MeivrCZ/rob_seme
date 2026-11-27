@@ -74,3 +74,16 @@ def test_soft_distances_never_exceed_the_exact_ones(scene, robot, rng, task):
 
 def test_home_is_free(scene, robot):
     assert scene.clearance(robot.q_home, 0.0).free
+
+
+def test_the_hoop_keeps_the_base_margin_from_the_base_and_the_foot():
+    from solver.soft_collision import HOOP_BASE_MARGIN, HOOP_BASE_OBSTACLES
+    scene = SoftScene(TurntableModel(axis_xy=np.array([0.45, 0.0]), base_offset=np.zeros(2),
+                                     base_yaw=0.0, direction=1, omega=0.0))
+    names = np.array(scene.obs.name)
+    assert np.all(scene._obs_is_base[names == "base"])
+    assert np.all(scene._obs_is_base[np.isin(names, HOOP_BASE_OBSTACLES)])
+    assert not np.any(scene._obs_is_puzzle & scene._obs_is_base)
+    assert scene.hoop_base_margin == HOOP_BASE_MARGIN > scene.hoop_puzzle_margin
+    # the foot is a root of its own (a group's gap uses one margin for all its leaves)
+    assert all(k in scene._obs_roots for k in np.flatnonzero(np.isin(names, HOOP_BASE_OBSTACLES)))

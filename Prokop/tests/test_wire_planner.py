@@ -124,3 +124,14 @@ def test_wire_frames_along_the_wire_match_the_checkpoints():
         assert np.all(np.diff(s) > 0)
         for frame, s_k in zip(path.frames[1:-1], s[1:-1]):
             assert np.allclose(wire_frame_at(s_k)[:3, 3], frame[:3, 3], atol=1e-9)
+
+
+def test_end_pose_keeps_the_ring_off_the_base():
+    from solver.hoop_pose import _rx
+    from solver.wire import (END_MIN_BOTTOM, END_Z, PAD_TOP_Z, RING_THICKNESS, end_pose_ok,
+                             ring_bottom_above_pad)
+    level = wire_path(0).frames[-1] @ _rx(np.pi)  # side B flat: the ring below hoop_center
+    assert np.isclose(ring_bottom_above_pad(level), END_Z - RING_THICKNESS - PAD_TOP_Z)
+    assert end_pose_ok(level)
+    tilted = level @ _rx(np.deg2rad(30))  # the rim dips ~17 mm: too close to the base
+    assert ring_bottom_above_pad(tilted) < END_MIN_BOTTOM and not end_pose_ok(tilted)

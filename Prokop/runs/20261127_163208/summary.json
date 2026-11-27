@@ -1,0 +1,95 @@
+{
+  "args": {
+    "seed": "0",
+    "direction": "1",
+    "axis": "None",
+    "offset": "(0.02, 0.0)",
+    "yaw": "0.0",
+    "speed": "0.5",
+    "tracker": "camera",
+    "frames": "8",
+    "interval": "1.0",
+    "pre_entry": "0.0",
+    "continuity": "[0.5, 2.0, 20.0]",
+    "margin_floor": "0.0",
+    "rank": "closest",
+    "speed_cap": "False",
+    "phases": "6",
+    "planner": "prokop",
+    "stop_after": "3",
+    "calibration": "Prokop/data/calibration/homography_20261127_154349.json",
+    "port": "8080",
+    "hold": "False",
+    "real": "True"
+  },
+  "phases": {
+    "Phase 1: turntable model": {
+      "detections": "6/8",
+      "model": {
+        "axis_xy": [
+          0.3423698780745147,
+          -0.013248262889844523
+        ],
+        "base_offset": [
+          0.013205736833213707,
+          -0.036393852938605156
+        ],
+        "base_yaw": -3.113234433969823,
+        "direction": -1,
+        "omega": 0.22339698412947634,
+        "period_s": 28.125649644124024
+      },
+      "fit_for_margins": {
+        "xy_rmse_m": 0.00045247465211139355,
+        "yaw_rmse_rad": 0.00929130451549742,
+        "times": [
+          6813.1776940380005,
+          6814.179003154,
+          6815.179672741,
+          6816.179556799,
+          6817.179865819,
+          6818.179422761001
+        ]
+      },
+      "ok": true,
+      "seconds": 8.2
+    },
+    "Phase 2: plan": {
+      "margins": {
+        "hoop_puzzle_mm": 7.623276664043826,
+        "joint_limit_deg": 8.894043845169874,
+        "sd_angle_deg": 1.7235109612924682
+      },
+      "reachability": "checkpoints reachable in 90, 100, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 90 %",
+      "plan": {
+        "seconds": 61.5,
+        "theta_start": -1.0651591646098,
+        "waypoints": 8,
+        "traversal_s": 5.508378805473156,
+        "entry_mm": 30.0,
+        "soft_clearance_mm": 1.6327983598307525,
+        "end_pose_waits": false,
+        "predicted_end_s": 102.2,
+        "candidates": [
+          {
+            "end_angle_deg": -129.99878025920262,
+            "sigma_min_mm": 26.79121501997156,
+            "limit_margin_deg": 10.335342316768841
+          }
+        ]
+      },
+      "approach": "through a pre-pre-entry pose 5 cm back and up: ring gap 12.7 mm, then 2.4 mm soft clearance into the waiting pose",
+      "ok": true,
+      "seconds": 61.68
+    },
+    "Phase 3: execution": {
+      "success": true,
+      "reason": "",
+      "steps_sent": 7,
+      "end_after_start_s": 102.1,
+      "ok": true,
+      "seconds": 30.56
+    }
+  },
+  "result": "all phases ran"
+}

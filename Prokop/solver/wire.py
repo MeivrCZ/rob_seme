@@ -13,7 +13,8 @@ x-z plane (measured on models/meshes/puzzle_D.stl, the same as the drawing):
 * the stem: the path ends END_BELOW_JOG below the jog (the whole jog is
   passed). There the ring must be lower than SUCCESS_HEIGHT above the pad
   (the base's top, PAD_TOP_Z), the assignment's success condition; the
-  planner checks it for the final pose (ring_top_above_pad).
+  planner checks it for the final pose (end_pose_ok), and that the ring's
+  lowest point stays END_MIN_BOTTOM above the pad.
 
 Granularity: tier 0 has a checkpoint only at the segment ends (so the bend is
 one move, its start and end); every next tier adds a checkpoint between each
@@ -55,6 +56,12 @@ END_BELOW_JOG = 0.005  # m, the path ends this far into the stem
 END_Z = JOG_BOTTOM[2] - END_BELOW_JOG  # m
 PAD_TOP_Z = 0.0006  # m, top of the base (the pad with the markers), puzzle frame (CAD)
 SUCCESS_HEIGHT = 0.04  # m, the ring must end lower than this above the pad
+# The ring's lowest point must end at least this high above the pad (user, 2026-11-27:
+# the real end poses came within a few mm of the base; touching the puzzle voids a run
+# and the base may count as the puzzle). A flat ring at the end checkpoint is 17.8 or
+# 24.4 mm above (the ring's thickness below or above hoop_center); each 15 deg of tilt
+# lowers its rim by ~9 mm. Together with SUCCESS_HEIGHT it keeps the end nearly flat.
+END_MIN_BOTTOM = 0.015  # m
 RING_OUTER_RADIUS = 0.0348  # m (CAD: models/meshes/hoop.stl)
 RING_THICKNESS = 0.0066  # m, the ring lies on the -z side of hoop_center
 
@@ -191,6 +198,24 @@ def ring_top_above_pad(ring: np.ndarray) -> float:
     top = (ring[2, 3] + max(0.0, -RING_THICKNESS * n[2])
            + RING_OUTER_RADIUS * np.sqrt(max(0.0, 1.0 - n[2] ** 2)))
     return float(top - PAD_TOP_Z)
+
+
+def ring_bottom_above_pad(ring: np.ndarray) -> float:
+    """Height of the ring's lowest point above the pad [m] (as ring_top_above_pad).
+
+    Args:
+        ring: Ring-centre frame (hoop_center) in the puzzle frame.
+    """
+    n = ring[:3, 2]
+    bottom = (ring[2, 3] + min(0.0, -RING_THICKNESS * n[2])
+              - RING_OUTER_RADIUS * np.sqrt(max(0.0, 1.0 - n[2] ** 2)))
+    return float(bottom - PAD_TOP_Z)
+
+
+def end_pose_ok(ring: np.ndarray) -> bool:
+    """Whether a final ring pose (hoop_center in the puzzle frame) counts: the whole ring
+    lower than SUCCESS_HEIGHT and no lower than END_MIN_BOTTOM above the pad."""
+    return ring_top_above_pad(ring) < SUCCESS_HEIGHT and ring_bottom_above_pad(ring) >= END_MIN_BOTTOM
 
 
 def checkpoint_arclengths(tier: int = 0, entry: float = ENTRY_OUTSIDE,

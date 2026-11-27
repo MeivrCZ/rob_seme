@@ -1,0 +1,99 @@
+{
+  "args": {
+    "seed": "0",
+    "direction": "1",
+    "axis": "None",
+    "offset": "(0.02, 0.0)",
+    "yaw": "0.0",
+    "speed": "0.5",
+    "tracker": "camera",
+    "frames": "8",
+    "interval": "1.0",
+    "pre_entry": "0.0",
+    "continuity": "[0.5, 2.0, 20.0]",
+    "margin_floor": "0.0",
+    "rank": "closest",
+    "speed_cap": "False",
+    "phases": "6",
+    "planner": "prokop",
+    "stop_after": "2",
+    "calibration": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_154349.json",
+    "port": "8080",
+    "hold": "False",
+    "real": "True"
+  },
+  "phases": {
+    "Phase 1: turntable model": {
+      "detections": "8/8",
+      "model": {
+        "axis_xy": [
+          0.5004267151571523,
+          -0.13352958427494643
+        ],
+        "base_offset": [
+          -0.010954106901631493,
+          0.005617378595629128
+        ],
+        "base_yaw": -2.6376109804582324,
+        "direction": -1,
+        "omega": 0.21913651784952576,
+        "period_s": 28.672470334196213
+      },
+      "fit_for_margins": {
+        "xy_rmse_m": 8.732765379023979e-05,
+        "yaw_rmse_rad": 0.0019970371776373438,
+        "times": [
+          4343.546254577001,
+          4344.5486146,
+          4345.549698197,
+          4346.549119011001,
+          4347.549388198,
+          4348.549312558001,
+          4349.549105868,
+          4350.549143646001
+        ]
+      },
+      "ok": true,
+      "seconds": 8.24
+    },
+    "Phase 2: plan": {
+      "margins": {
+        "hoop_puzzle_mm": 3.6788124772380373,
+        "joint_limit_deg": 5.972114377516292,
+        "sd_angle_deg": 0.9930285943790729
+      },
+      "reachability": "checkpoints reachable in 75, 83, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 71 %",
+      "plan": {
+        "seconds": 23.6,
+        "theta_start": 3.3736946641790073,
+        "waypoints": 7,
+        "traversal_s": 4.578991660107084,
+        "entry_mm": 50.0,
+        "soft_clearance_mm": 2.9526132488656534,
+        "end_pose_waits": false,
+        "predicted_end_s": 56.0,
+        "candidates": [
+          {
+            "end_angle_deg": 137.31316059274133,
+            "sigma_min_mm": 59.03511406366197,
+            "limit_margin_deg": 10.883877807491343
+          },
+          {
+            "end_angle_deg": 167.31316059274133,
+            "sigma_min_mm": 32.95020347224365,
+            "limit_margin_deg": 7.909083706623851
+          },
+          {
+            "end_angle_deg": 107.31316059274134,
+            "sigma_min_mm": 56.15643968837947,
+            "limit_margin_deg": 7.9602813453257655
+          }
+        ]
+      },
+      "approach": "through a pre-pre-entry pose 5 cm back and up: ring gap 14.4 mm, then 10.2 mm soft clearance into the waiting pose",
+      "ok": true,
+      "seconds": 23.84
+    }
+  },
+  "result": "all phases ran"
+}

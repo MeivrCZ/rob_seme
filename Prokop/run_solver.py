@@ -74,7 +74,7 @@ from turntable_orbit import (MARKER_HEIGHT_ABOVE_TABLE_M, capture_series,  # noq
                              draw_orbit, fit_orbit, measure_base)
 
 from solver.approach import ApproachChecker, plan_line, ring_in_flange  # noqa: E402
-from solver.contracts import (OMEGA, BaseMeasurement, ModelTracker, Plan,  # noqa: E402
+from solver.contracts import (OMEGA, SPIN_PERIOD, BaseMeasurement, ModelTracker, Plan,  # noqa: E402
                               PuzzlePath, TurntableModel)
 from solver.executor import LEAD, ExecutionResult, Executor  # noqa: E402
 from solver.timing import RobotTiming  # noqa: E402
@@ -91,6 +91,10 @@ TRAVERSAL_MIN = 4.0  # s
 EXEC_OVERHEAD = 4.0  # s, camera tracker ready + LEAD + compute budget (measured: see logs)
 TIME_MARGIN = 3.0  # s
 PLAN_PHASES = 6  # start phases handed to the planner (an even grid over a turn)
+# Perception watches a whole turn (user, after the lab of 2026-11-27: 10 images over 9 s
+# gave periods of 27.89 and 28.70 s and the tracker drifted 0.06-0.26 deg/s from the
+# fit; planning takes ~20 s on the station PC, so the time is there).
+PERCEPTION_SPAN = SPIN_PERIOD  # s, from the first image to the last
 FINAL_HEIGHT = 0.04  # m, success: hoop less than this above the base (assignment)
 
 
@@ -795,7 +799,9 @@ def main() -> None:
     parser.add_argument("--speed", type=float, default=0.5, help="relative robot speed")
     parser.add_argument("--tracker", choices=("camera", "fitted"), default="camera",
                         help="phase 3: Vojtech's camera tracker or the fitted model alone")
-    parser.add_argument("--frames", type=int, default=8, help="images for phase 1")
+    parser.add_argument("--frames", type=int, default=None,
+                        help="images for phase 1 (default: a whole turn, PERCEPTION_SPAN "
+                             "at --interval)")
     parser.add_argument("--interval", type=float, default=1.0, help="s between images")
     parser.add_argument("--pre-entry", type=float, default=0.0,
                         help="copy planner: start this far [m] before checkpoint 0 "
@@ -823,6 +829,8 @@ def main() -> None:
     parser.add_argument("--hold", action="store_true", help="keep the viewer open at the end")
     parser.add_argument("--real", action="store_true", help="the real robot (untested)")
     args = parser.parse_args()
+    if args.frames is None:  # a whole turn: the first and the last image a period apart
+        args.frames = int(np.ceil(PERCEPTION_SPAN / args.interval - 1e-9)) + 1
 
     out = RUNS / datetime.now().strftime("%Y%m%d_%H%M%S")
     out.mkdir(parents=True, exist_ok=True)
@@ -892,6 +900,8 @@ def main() -> None:
                                calibration, out, t_base)
     except PhaseFailed as error:
         failed = str(error)
+    except KeyboardInterrupt:  # Ctrl+C: recorded as such (it used to say "all phases ran")
+        failed = "interrupted (Ctrl+C)"
     finally:
         summary["result"] = "stopped: " + failed if failed else "all phases ran"
         log(f"\n=== Result: {summary['result']} ===")

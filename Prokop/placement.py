@@ -37,7 +37,9 @@ MODELS = Path(__file__).resolve().parent / "models"  # URDFs and their meshes
 MIN_CLEARANCE = 0.01  # m, to the robot in q_home
 STABILITY_MARGIN = 0.005  # m, centre of mass from the edge of the support region
 BASE_HALF = 0.0625  # m, half side of the base plate footprint
-BASE_FOAM = 0.025  # m, foam pad under the base plate (part of base.urdf)
+BASE_FOAM = 0.0274  # m, foam pad under the base plate (part of base.urdf); tape 25 mm (E2),
+# but the lab of 2026-11-27 measured the marker plane 67.0 mm above the table, 2.4 mm
+# above the model's: the difference is put here (the foam is the softest, least exact part)
 FOAM_DENSITY = 30.0  # kg/m^3, ASSUMED (PU foam)
 # Mass model for the centre of mass: printed parts are PETG (1.27 g/cm^3) with
 # 3 perimeters + 10-20 % infill -> ASSUMED effective fill 0.5; magnets in base and

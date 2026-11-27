@@ -1,0 +1,61 @@
+{
+  "args": {
+    "seed": "0",
+    "direction": "1",
+    "axis": "None",
+    "offset": "(0.02, 0.0)",
+    "yaw": "0.0",
+    "speed": "0.5",
+    "tracker": "camera",
+    "frames": "8",
+    "interval": "1.0",
+    "pre_entry": "0.0",
+    "continuity": "[0.5, 2.0, 20.0]",
+    "margin_floor": "0.0",
+    "rank": "closest",
+    "speed_cap": "False",
+    "phases": "6",
+    "planner": "prokop",
+    "stop_after": "1",
+    "calibration": "Prokop/data/calibration/homography_20261127_154349.json",
+    "port": "8080",
+    "hold": "False",
+    "real": "True"
+  },
+  "phases": {
+    "Phase 1: turntable model": {
+      "detections": "8/8",
+      "model": {
+        "axis_xy": [
+          0.5006532002170265,
+          -0.133671026594277
+        ],
+        "base_offset": [
+          -0.010389961025349038,
+          0.006819629886469791
+        ],
+        "base_yaw": -2.7379997124920843,
+        "direction": -1,
+        "omega": 0.22025664734507097,
+        "period_s": 28.52665462275863
+      },
+      "fit_for_margins": {
+        "xy_rmse_m": 0.0001371102453356409,
+        "yaw_rmse_rad": 0.002838408639551893,
+        "times": [
+          4484.515694248001,
+          4485.518702409,
+          4486.518951923001,
+          4487.518569646,
+          4488.5184034680005,
+          4489.518979242001,
+          4490.518366626,
+          4491.518569937
+        ]
+      },
+      "ok": true,
+      "seconds": 8.19
+    }
+  },
+  "result": "all phases ran"
+}

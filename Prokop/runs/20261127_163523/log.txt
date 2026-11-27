@@ -1,0 +1,16 @@
+Run folder: /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/runs/20261127_163523
+
+=== Phase 1: turntable model ===
+P1.2: 8 images, 1.0 s apart
+  frame 00: 1 marker(s), xy [0.6133 0.2518], yaw +99.35 deg
+  frame 01: no markers
+  frame 02: no markers
+  frame 03: no markers
+  frame 04: no markers
+  frame 05: no markers
+  frame 06: no markers
+  frame 07: no markers
+--> FAILED: only 1 detections (fit needs >= 4)
+(Phase 1: turntable model: 8.1 s)
+
+=== Result: stopped: only 1 detections (fit needs >= 4) ===

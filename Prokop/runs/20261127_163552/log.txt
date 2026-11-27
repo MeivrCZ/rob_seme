@@ -1,0 +1,13 @@
+Run folder: /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/runs/20261127_163552
+
+=== Phase 1: turntable model ===
+P1.2: 8 images, 1.0 s apart
+  frame 00: 1 marker(s), xy [0.6077 0.237 ], yaw +84.21 deg
+  frame 01: no markers
+  frame 02: no markers
+  frame 03: no markers
+  frame 04: no markers
+  frame 05: no markers
+(Phase 1: turntable model: 6.2 s)
+
+=== Result: all phases ran ===
