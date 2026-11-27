@@ -1,0 +1,11 @@
+command delay (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_174526_command_delay
+real robot at q_home
+the chain is free of the table and the cell (142 mm)
+
+1. measure (COMMAND_DELAY 0.120 s): lateness per move -53, -56, -57, -59, -60 ms
+  median -57 ms, spread 6 ms -> COMMAND_DELAY 0.120 -> 0.063 s
+
+2. verify (COMMAND_DELAY 0.063 s): lateness per move -6, -9, -10, -12, -12 ms
+  median -10 ms with the new delay (must be within +-10 ms)
+
+NOT written: the verification is off by -10 ms
