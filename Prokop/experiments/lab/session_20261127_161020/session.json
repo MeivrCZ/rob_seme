@@ -1,0 +1,126 @@
+{
+  "started": "2026-11-27T16:10:20",
+  "sim": false,
+  "host": "rob-crs93",
+  "git": {
+    "head": "3f39f72",
+    "subject": "added lab checking scripts",
+    "dirty": false
+  },
+  "calibration": null,
+  "steps": {
+    "1": {
+      "check": "dims",
+      "title": "the model's dimensions (caliper)",
+      "started": "2026-11-27T16:10:22",
+      "exit": 0,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_161022_dims",
+      "stderr": "",
+      "measured": {
+        "puzzle bar: side of the square cross-section": null,
+        "puzzle: top bar centreline above the pad (base top)": null,
+        "puzzle: open end from the stem's axis (horizontal)": null,
+        "puzzle: bend radius (centreline)": null,
+        "puzzle: jog top above the pad": null,
+        "puzzle: jog bottom above the pad": null,
+        "hoop: hole diameter": null,
+        "hoop: ring outer diameter": null,
+        "hoop: ring thickness": null,
+        "base: marker plane above the table": null,
+        "ring centre (mid-thickness) above the table at q_home": null,
+        "ring centre in front of the robot axis at q_home": null
+      },
+      "verdict": null,
+      "rows": [
+        {
+          "what": "puzzle bar: side of the square cross-section",
+          "measured": "-",
+          "limit": "10.0 +-1",
+          "ok": null
+        },
+        {
+          "what": "puzzle: top bar centreline above the pad (base top)",
+          "measured": "-",
+          "limit": "154.4 +-1",
+          "ok": null
+        },
+        {
+          "what": "puzzle: open end from the stem's axis (horizontal)",
+          "measured": "-",
+          "limit": "85.0 +-1",
+          "ok": null
+        },
+        {
+          "what": "puzzle: bend radius (centreline)",
+          "measured": "-",
+          "limit": "50.0 +-1",
+          "ok": null
+        },
+        {
+          "what": "puzzle: jog top above the pad",
+          "measured": "-",
+          "limit": "44.4 +-1",
+          "ok": null
+        },
+        {
+          "what": "puzzle: jog bottom above the pad",
+          "measured": "-",
+          "limit": "29.4 +-1",
+          "ok": null
+        },
+        {
+          "what": "hoop: hole diameter",
+          "measured": "-",
+          "limit": "60.0 +-1",
+          "ok": null
+        },
+        {
+          "what": "hoop: ring outer diameter",
+          "measured": "-",
+          "limit": "69.6 +-1",
+          "ok": null
+        },
+        {
+          "what": "hoop: ring thickness",
+          "measured": "-",
+          "limit": "6.6 +-1",
+          "ok": null
+        },
+        {
+          "what": "base: marker plane above the table",
+          "measured": "-",
+          "limit": "64.6 +-1",
+          "ok": null
+        },
+        {
+          "what": "ring centre (mid-thickness) above the table at q_home",
+          "measured": "-",
+          "limit": "977.4 +-1",
+          "ok": null
+        },
+        {
+          "what": "ring centre in front of the robot axis at q_home",
+          "measured": "-",
+          "limit": "323.0 +-1",
+          "ok": null
+        }
+      ]
+    },
+    "2": {
+      "skipped": "by the operator"
+    },
+    "3": {
+      "skipped": "by the operator"
+    },
+    "4": {
+      "skipped": "by the operator"
+    },
+    "5": {
+      "skipped": "by the operator"
+    },
+    "6": {
+      "skipped": "by the operator"
+    }
+  },
+  "notes": []
+}

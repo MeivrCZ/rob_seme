@@ -1,0 +1,1 @@
+lab check 'fov' (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_165511_fov

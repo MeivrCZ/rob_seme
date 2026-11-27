@@ -1,0 +1,17 @@
+lab check 'turntable' (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154542_turntable
+real robot at q_home
+  image at 4034.92: 2 marker(s), base (520.1, -100.6) mm, yaw -69.7 deg
+  image at 4035.92: 2 marker(s), base (517.9, -98.7) mm, yaw -82.5 deg
+  image at 4036.92: 2 marker(s), base (516.2, -96.3) mm, yaw -95.2 deg
+  image at 4037.92: 2 marker(s), base (515.1, -93.6) mm, yaw -107.4 deg
+  image at 4038.92: 2 marker(s), base (514.6, -90.8) mm, yaw -119.7 deg
+  image at 4039.92: 2 marker(s), base (514.8, -87.9) mm, yaw -132.3 deg
+  image at 4040.92: 2 marker(s), base (515.7, -85.2) mm, yaw -144.5 deg
+  image at 4041.92: 2 marker(s), base (517.0, -82.7) mm, yaw -156.6 deg
+  image at 4042.92: 1 marker(s), base (519.0, -80.8) mm, yaw -170.5 deg
+  image at 4043.91: 2 marker(s), base (521.2, -78.4) mm, yaw +176.5 deg
+
+orbit fit from 10 images: axis (527.9, -90.0) mm, offset 13.2 mm, period 28.70 s (E3 stopwatch: 28.00 s), direction -1; residuals 0.17 mm, 0.50 deg
+
+camera tracker for 30 s against the fit (Vojtech's CameraPhaseTracker; the drift = how far the fit alone would be off):
+  tracker - fit: -1.19 deg at the start, -9.02 deg after 30 s (the fit's speed error, about 0.261 deg/s); markers lost 0 time(s); the latest measurement at most 0.34 s old

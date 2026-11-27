@@ -1,0 +1,34 @@
+lab check 'calibrate' (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_165009_calibrate
+real robot at q_home
+27 of 27 grid points reachable; the route q_home -> points -> q_home is free of the table and the cell (least soft clearance 57 mm)
+  point  0: ring at (349.2, 137.0) px (hole detector), centre [389.9, -150.2, 76.0] mm; the camera model predicts [323.5, 239.2] px
+  point  1: ring at (341.1, 536.8) px (hole detector), centre [484.9, -150.2, 75.9] mm; the camera model predicts [323.5, 641.4] px
+  point  2: ring at (336.2, 937.1) px (hole detector), centre [580.0, -150.1, 76.0] mm; the camera model predicts [323.6, 1044.2] px
+  point  3: ring at (951.3, 952.0) px (hole detector), centre [580.0, -0.4, 76.0] mm; the camera model predicts [957.9, 1044.3] px
+  point  4: ring at (957.8, 551.2) px (hole detector), centre [485.0, -0.2, 76.0] mm; the camera model predicts [958.8, 641.9] px
+  point  5: ring at (969.3, 146.0) px (hole detector), centre [390.0, -0.1, 76.0] mm; the camera model predicts [959.0, 239.5] px
+  point  6: ring at (1585.1, 167.7) px (hole detector), centre [390.0, 149.9, 76.0] mm; the camera model predicts [1594.4, 239.5] px
+  point  7: ring at (1581.8, 563.6) px (hole detector), centre [485.0, 149.9, 75.9] mm; the camera model predicts [1594.3, 641.9] px
+  point  8: ring at (1572.8, 958.0) px (hole detector), centre [580.1, 149.8, 76.0] mm; the camera model predicts [1594.1, 1044.5] px
+  point  9: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 10: ring at (316.3, 543.3) px (hole detector), centre [485.0, -150.1, 131.0] mm; the camera model predicts [292.2, 643.9] px
+  point 11: ring at (308.9, 960.2) px (hole detector), centre [579.9, -150.3, 131.0] mm; the camera model predicts [291.5, 1066.0] px
+  point 12: ring at (956.8, 975.7) px (hole detector), centre [580.0, -0.2, 131.0] mm; the camera model predicts [958.5, 1066.3] px
+  point 13: ring at (964.5, 555.8) px (hole detector), centre [485.0, 0.1, 131.0] mm; the camera model predicts [959.8, 644.0] px
+  point 14: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 15: ring at (1630.3, 149.5) px (hole detector), centre [390.1, 149.8, 131.1] mm; the camera model predicts [1625.7, 221.9] px
+  point 16: ring at (1621.4, 567.8) px (hole detector), centre [484.9, 150.1, 131.0] mm; the camera model predicts [1626.9, 643.7] px
+  point 17: ring at (1606.6, 985.4) px (hole detector), centre [580.1, 149.7, 131.0] mm; the camera model predicts [1624.8, 1066.6] px
+  point 18: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 19: ring at (283.9, 555.6) px (hole detector), centre [485.1, -149.7, 191.0] mm; the camera model predicts [255.8, 646.9] px
+  point 20: ring at (275.6, 994.5) px (hole detector), centre [580.0, -150.1, 191.1] mm; the camera model predicts [254.0, 1092.8] px
+  point 21: ring at (960.2, 1010.2) px (hole detector), centre [580.0, -0.2, 191.0] mm; the camera model predicts [958.8, 1093.0] px
+  point 22: ring at (971.3, 566.2) px (hole detector), centre [485.0, 0.3, 191.0] mm; the camera model predicts [960.9, 646.6] px
+  point 23: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 24: ring NOT found by the hole detector (; the blue-ring fit found it at (1683.1, 137.3) px, not used (--ring-fallback to use it))
+  point 25: ring at (1664.2, 579.3) px (hole detector), centre [485.1, 149.7, 191.1] mm; the camera model predicts [1663.1, 647.0] px
+  point 26: ring at (1649.4, 1020.2) px (hole detector), centre [580.1, 149.7, 191.0] mm; the camera model predicts [1662.9, 1093.3] px
+
+calibration from 22 points: 16 inliers, rejected (RANSAC) []; on 6 held-out points: 5.28 px RMS, 1.24 mm RMS in the table plane
+saved: /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_165215.json
+use it: uv run Prokop/run_solver.py --real --calibration /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_165215.json

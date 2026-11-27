@@ -1,0 +1,27 @@
+{
+  "started": "2026-11-27T15:40:52",
+  "sim": false,
+  "host": "rob-crs93",
+  "git": {
+    "head": "3f39f72",
+    "subject": "added lab checking scripts",
+    "dirty": false
+  },
+  "calibration": null,
+  "steps": {
+    "1": {
+      "skipped": "by the operator"
+    },
+    "2": {
+      "check": "calibrate",
+      "title": "camera calibration (homography)",
+      "started": "2026-11-27T15:40:54",
+      "exit": 1,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154054_calibrate",
+      "stderr": "the robot is 176.7 deg from q_home: home it by hand first (this script never homes)",
+      "verdict": false,
+      "rows": []
+    }
+  },
+  "notes": []
+}

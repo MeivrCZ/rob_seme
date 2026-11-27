@@ -1,0 +1,147 @@
+lab check 'fov' (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154659_fov
+real robot at q_home
+every second: the markers seen (move the base to the work area's corners and edges; Ctrl+C to stop)
+  15:47:01: markers [1, 2], base at (532, -78) mm
+  15:47:02: markers [1, 2], base at (533, -78) mm
+  15:47:03: markers [1, 2], base at (535, -80) mm
+  15:47:04: markers [1], base at (537, -82) mm
+  15:47:05: markers [1], base at (539, -84) mm
+  15:47:06: markers [1], base at (540, -87) mm
+  15:47:07: markers [1], base at (540, -90) mm
+  15:47:08: markers [1], base at (540, -93) mm
+  15:47:09: markers [1], base at (540, -95) mm
+  15:47:10: markers [1], base at (538, -98) mm
+  15:47:11: markers [1], base at (536, -100) mm
+  15:47:12: markers [1], base at (533, -101) mm
+  15:47:13: markers [1], base at (531, -103) mm
+  15:47:14: markers [1, 2], base at (528, -103) mm
+  15:47:15: markers [1, 2], base at (525, -103) mm
+  15:47:16: markers [1, 2], base at (522, -102) mm
+  15:47:17: markers [1, 2], base at (520, -100) mm
+  15:47:18: markers [1, 2], base at (518, -98) mm
+  15:47:19: markers [1, 2], base at (516, -96) mm
+  15:47:20: markers [1, 2], base at (515, -93) mm
+  15:47:21: markers [1, 2], base at (514, -90) mm
+  15:47:22: markers [1, 2], base at (515, -87) mm
+  15:47:23: markers [1, 2], base at (516, -85) mm
+  15:47:24: markers [2], base at (518, -83) mm
+  15:47:25: markers [2], base at (520, -81) mm
+  15:47:26: markers [1, 2], base at (521, -78) mm
+  15:47:27: markers [1, 2], base at (524, -77) mm
+  15:47:28: markers [1, 2], base at (526, -77) mm
+  15:47:29: markers [1, 2], base at (530, -77) mm
+  15:47:30: markers [1, 2], base at (532, -78) mm
+  15:47:31: markers [1, 2], base at (535, -79) mm
+  15:47:32: markers [1], base at (539, -80) mm
+  15:47:33: markers [1], base at (539, -79) mm
+  15:47:34: no markers
+  15:47:35: no markers
+  15:47:36: no markers
+  15:47:37: no markers
+  15:47:38: no markers
+  15:47:39: no markers
+  15:47:40: markers [2], base at (518, -217) mm
+  15:47:41: markers [2], base at (505, -219) mm
+  15:47:42: markers [2], base at (503, -219) mm
+  15:47:43: markers [2], base at (493, -217) mm
+  15:47:44: markers [2], base at (478, -216) mm
+  15:47:45: markers [2], base at (462, -216) mm
+  15:47:46: markers [2], base at (442, -216) mm
+  15:47:47: markers [2], base at (412, -216) mm
+  15:47:48: markers [2], base at (395, -219) mm
+  15:47:49: markers [2], base at (380, -221) mm
+  15:47:50: markers [2], base at (380, -221) mm
+  15:47:51: markers [2], base at (380, -218) mm
+  15:47:52: markers [2], base at (376, -178) mm
+  15:47:53: no markers
+  15:47:54: markers [2], base at (381, -91) mm
+  15:47:55: markers [2], base at (382, -88) mm
+  15:47:56: markers [2], base at (383, -75) mm
+  15:47:57: markers [2], base at (382, -49) mm
+  15:47:58: markers [2], base at (378, -11) mm
+  15:47:59: markers [2], base at (379, 20) mm
+  15:48:00: markers [2], base at (379, 51) mm
+  15:48:01: markers [2], base at (378, 84) mm
+  15:48:02: no markers
+  15:48:03: no markers
+  15:48:04: no markers
+  15:48:05: no markers
+  15:48:06: no markers
+  15:48:07: no markers
+  15:48:08: no markers
+  15:48:09: no markers
+  15:48:10: no markers
+  15:48:11: no markers
+  15:48:12: no markers
+  15:48:13: no markers
+  15:48:14: no markers
+  15:48:15: no markers
+  15:48:16: no markers
+  15:48:17: no markers
+  15:48:18: no markers
+  15:48:19: markers [1], base at (413, 201) mm
+  15:48:20: markers [1], base at (413, 201) mm
+  15:48:21: markers [1], base at (413, 201) mm
+  15:48:22: markers [1], base at (413, 200) mm
+  15:48:23: markers [1], base at (424, 200) mm
+  15:48:24: markers [1], base at (444, 198) mm
+  15:48:25: markers [1], base at (462, 199) mm
+  15:48:26: markers [1], base at (479, 199) mm
+  15:48:27: markers [1], base at (499, 199) mm
+  15:48:28: markers [1], base at (517, 201) mm
+  15:48:29: markers [1], base at (549, 199) mm
+  15:48:30: markers [1], base at (567, 201) mm
+  15:48:31: markers [1], base at (576, 201) mm
+  15:48:32: markers [1], base at (586, 199) mm
+  15:48:33: markers [1], base at (609, 198) mm
+  15:48:34: markers [1], base at (623, 198) mm
+  15:48:35: markers [1], base at (625, 201) mm
+  15:48:36: markers [1], base at (625, 203) mm
+  15:48:37: no markers
+  15:48:38: markers [1], base at (640, 203) mm
+  15:48:39: markers [1], base at (630, 203) mm
+  15:48:40: markers [1], base at (626, 202) mm
+  15:48:41: markers [1], base at (625, 202) mm
+  15:48:42: markers [1], base at (626, 179) mm
+  15:48:43: markers [1], base at (624, 165) mm
+  15:48:44: markers [1], base at (625, 143) mm
+  15:48:45: markers [1], base at (625, 133) mm
+  15:48:46: markers [1], base at (623, 114) mm
+  15:48:47: markers [1], base at (622, 88) mm
+  15:48:48: markers [1], base at (623, 60) mm
+  15:48:49: markers [1], base at (626, 30) mm
+  15:48:50: markers [1], base at (624, 11) mm
+  15:48:51: markers [1], base at (625, -14) mm
+  15:48:52: markers [1], base at (628, -39) mm
+  15:48:53: markers [1], base at (628, -67) mm
+  15:48:54: no markers
+  15:48:55: markers [1], base at (631, -143) mm
+  15:48:56: no markers
+  15:48:57: no markers
+  15:48:58: no markers
+  15:48:59: no markers
+  15:49:00: no markers
+  15:49:01: no markers
+  15:49:02: no markers
+  15:49:03: no markers
+  15:49:04: no markers
+  15:49:05: no markers
+  15:49:06: no markers
+  15:49:07: no markers
+  15:49:08: no markers
+  15:49:09: no markers
+  15:49:10: no markers
+  15:49:11: markers [1], base at (613, -170) mm
+  15:49:12: markers [1], base at (612, -167) mm
+  15:49:13: markers [1], base at (609, -167) mm
+  15:49:14: markers [1], base at (584, -167) mm
+  15:49:15: no markers
+  15:49:16: no markers
+  15:49:17: no markers
+  15:49:18: markers [2], base at (504, -177) mm
+  15:49:19: markers [1, 2], base at (511, -165) mm
+  15:49:20: markers [1, 2], base at (512, -163) mm
+  15:49:21: markers [1, 2], base at (512, -163) mm
+  15:49:22: markers [1, 2], base at (512, -163) mm
+  15:49:23: markers [1, 2], base at (512, -163) mm
+  15:49:24: markers [1, 2], base at (512, -163) mm

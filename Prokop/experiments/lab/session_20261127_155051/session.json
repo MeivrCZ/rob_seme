@@ -1,0 +1,88 @@
+{
+  "started": "2026-11-27T15:50:51",
+  "sim": false,
+  "host": "rob-crs93",
+  "git": {
+    "head": "3f39f72",
+    "subject": "added lab checking scripts",
+    "dirty": false
+  },
+  "calibration": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_154349.json",
+  "steps": {
+    "1": {
+      "skipped": "by the operator"
+    },
+    "2": {
+      "skipped": "by the operator"
+    },
+    "3": {
+      "skipped": "by the operator"
+    },
+    "4": {
+      "skipped": "by the operator"
+    },
+    "5": {
+      "skipped": "by the operator"
+    },
+    "6": {
+      "check": "dryrun",
+      "title": "solver dry run (perception + planning, no motion)",
+      "started": "2026-11-27T15:50:55",
+      "exit": 0,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/runs/20261127_155059",
+      "stderr": "",
+      "verdict": true,
+      "rows": [
+        {
+          "what": "Phase 1: turntable model",
+          "measured": "ok, 8.24 s",
+          "limit": "ok",
+          "ok": true
+        },
+        {
+          "what": "Phase 2: plan",
+          "measured": "ok, 23.84 s",
+          "limit": "ok",
+          "ok": true
+        },
+        {
+          "what": "result",
+          "measured": "all phases ran",
+          "limit": "all phases ran",
+          "ok": null
+        },
+        {
+          "what": "orbit",
+          "measured": "P1.3: fit_orbit",
+          "limit": "-",
+          "ok": null
+        },
+        {
+          "what": "margins from the uncertainties",
+          "measured": "P2: margins from the uncertainties: hoop-puzzle 3.7 mm, joint limits 6.0 deg (k = 2: angle sd 0.99 deg incl. speed sd 0.049 deg/s over 12 s, position sd 0.09 mm, reach 101 mm, dimensions sd 0.58 mm)",
+          "limit": "-",
+          "ok": null
+        },
+        {
+          "what": "reachability map",
+          "measured": "P2: reachability map (34 ms): checkpoints reachable in 75, 83, 100, 100, 100, 100, 100 % of the turntable's angles; start angles from which all are reachable in time: 71 %",
+          "limit": "-",
+          "ok": null
+        },
+        {
+          "what": "predicted end",
+          "measured": "predicted end 56.0 s after the start (limit 120 s)",
+          "limit": "-",
+          "ok": null
+        },
+        {
+          "what": "predicted end [s]",
+          "measured": "56.0",
+          "limit": "< 120 minus the margin",
+          "ok": true
+        }
+      ]
+    }
+  },
+  "notes": []
+}

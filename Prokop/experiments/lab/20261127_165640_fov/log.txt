@@ -1,0 +1,391 @@
+lab check 'fov' (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_165640_fov
+real robot at q_home
+every second: the markers seen (move the base to the work area's corners and edges; Ctrl+C to stop)
+  16:56:42: no markers
+  16:56:43: no markers
+  16:56:44: no markers
+  16:56:45: no markers
+  16:56:46: no markers
+  16:56:47: no markers
+  16:56:48: no markers
+  16:56:49: no markers
+  16:56:50: no markers
+  16:56:51: no markers
+  16:56:52: no markers
+  16:56:53: no markers
+  16:56:54: no markers
+  16:56:55: no markers
+  16:56:56: no markers
+  16:56:57: no markers
+  16:56:58: no markers
+  16:56:59: no markers
+  16:57:00: markers [2], base at (640, -246) mm
+  16:57:01: markers [2], base at (637, -243) mm
+  16:57:02: markers [2], base at (637, -243) mm
+  16:57:03: markers [2], base at (637, -243) mm
+  16:57:04: markers [2], base at (637, -243) mm
+  16:57:05: markers [2], base at (637, -245) mm
+  16:57:06: markers [2], base at (636, -247) mm
+  16:57:07: no markers
+  16:57:08: no markers
+  16:57:09: no markers
+  16:57:10: no markers
+  16:57:11: markers [2], base at (634, -245) mm
+  16:57:12: markers [2], base at (633, -241) mm
+  16:57:13: markers [2], base at (634, -242) mm
+  16:57:14: markers [2], base at (636, -241) mm
+  16:57:15: markers [2], base at (639, -241) mm
+  16:57:16: markers [2], base at (641, -241) mm
+  16:57:17: markers [2], base at (644, -241) mm
+  16:57:18: markers [2], base at (648, -241) mm
+  16:57:19: markers [2], base at (652, -240) mm
+  16:57:20: markers [2], base at (656, -240) mm
+  16:57:21: markers [2], base at (662, -240) mm
+  16:57:22: no markers
+  16:57:23: no markers
+  16:57:24: no markers
+  16:57:25: no markers
+  16:57:26: no markers
+  16:57:27: no markers
+  16:57:28: markers [2], base at (660, -233) mm
+  16:57:29: markers [2], base at (658, -233) mm
+  16:57:30: markers [2], base at (655, -232) mm
+  16:57:31: markers [2], base at (650, -231) mm
+  16:57:32: markers [2], base at (644, -233) mm
+  16:57:33: markers [2], base at (640, -235) mm
+  16:57:34: markers [2], base at (639, -241) mm
+  16:57:35: markers [2], base at (637, -245) mm
+  16:57:36: markers [2], base at (632, -247) mm
+  16:57:37: no markers
+  16:57:38: markers [2], base at (623, -247) mm
+  16:57:39: markers [2], base at (620, -243) mm
+  16:57:40: markers [2], base at (615, -243) mm
+  16:57:41: markers [2], base at (600, -243) mm
+  16:57:42: markers [2], base at (587, -243) mm
+  16:57:43: markers [2], base at (563, -244) mm
+  16:57:44: markers [2], base at (547, -242) mm
+  16:57:45: markers [2], base at (534, -240) mm
+  16:57:46: markers [2], base at (513, -237) mm
+  16:57:47: markers [2], base at (491, -240) mm
+  16:57:48: markers [2], base at (474, -241) mm
+  16:57:49: markers [2], base at (461, -243) mm
+  16:57:50: markers [2], base at (442, -244) mm
+  16:57:51: markers [2], base at (429, -242) mm
+  16:57:52: markers [2], base at (421, -242) mm
+  16:57:53: no markers
+  16:57:54: no markers
+  16:57:55: no markers
+  16:57:56: no markers
+  16:57:57: no markers
+  16:57:58: markers [2], base at (426, -244) mm
+  16:57:59: markers [2], base at (434, -244) mm
+  16:58:00: markers [2], base at (434, -244) mm
+  16:58:01: markers [2], base at (433, -247) mm
+  16:58:02: no markers
+  16:58:03: no markers
+  16:58:04: no markers
+  16:58:05: no markers
+  16:58:06: no markers
+  16:58:07: markers [2], base at (434, -249) mm
+  16:58:08: markers [2], base at (434, -247) mm
+  16:58:09: markers [2], base at (434, -247) mm
+  16:58:10: markers [2], base at (434, -247) mm
+  16:58:11: markers [2], base at (430, -246) mm
+  16:58:12: markers [2], base at (426, -245) mm
+  16:58:13: markers [2], base at (423, -244) mm
+  16:58:14: markers [2], base at (420, -244) mm
+  16:58:15: markers [2], base at (417, -244) mm
+  16:58:16: no markers
+  16:58:17: no markers
+  16:58:18: no markers
+  16:58:19: no markers
+  16:58:20: no markers
+  16:58:21: markers [2], base at (418, -242) mm
+  16:58:22: markers [2], base at (419, -242) mm
+  16:58:23: markers [2], base at (419, -236) mm
+  16:58:24: markers [2], base at (419, -221) mm
+  16:58:25: markers [2], base at (419, -208) mm
+  16:58:26: markers [2], base at (418, -189) mm
+  16:58:27: markers [1, 2], base at (419, -167) mm
+  16:58:28: markers [1, 2], base at (418, -155) mm
+  16:58:29: markers [1, 2], base at (417, -138) mm
+  16:58:30: markers [1, 2], base at (415, -126) mm
+  16:58:31: markers [1], base at (408, -126) mm
+  16:58:32: markers [1], base at (402, -124) mm
+  16:58:33: markers [1], base at (397, -123) mm
+  16:58:34: markers [1], base at (392, -122) mm
+  16:58:35: markers [1], base at (388, -121) mm
+  16:58:36: markers [1], base at (386, -121) mm
+  16:58:37: markers [1], base at (383, -120) mm
+  16:58:38: markers [1], base at (379, -121) mm
+  16:58:39: markers [1], base at (376, -120) mm
+  16:58:40: markers [1], base at (374, -120) mm
+  16:58:41: markers [1], base at (364, -119) mm
+  16:58:42: markers [1], base at (343, -116) mm
+  16:58:43: no markers
+  16:58:44: no markers
+  16:58:45: no markers
+  16:58:46: no markers
+  16:58:47: markers [1], base at (340, -113) mm
+  16:58:48: markers [1], base at (342, -113) mm
+  16:58:49: markers [1], base at (343, -119) mm
+  16:58:50: markers [1], base at (342, -127) mm
+  16:58:51: markers [1], base at (341, -144) mm
+  16:58:52: markers [1], base at (341, -161) mm
+  16:58:53: markers [1], base at (340, -177) mm
+  16:58:54: no markers
+  16:58:55: no markers
+  16:58:56: no markers
+  16:58:57: no markers
+  16:58:58: no markers
+  16:58:59: no markers
+  16:59:00: no markers
+  16:59:01: markers [1], base at (341, -163) mm
+  16:59:02: markers [1], base at (345, -166) mm
+  16:59:03: markers [1], base at (345, -173) mm
+  16:59:04: markers [1], base at (346, -176) mm
+  16:59:05: markers [1], base at (347, -150) mm
+  16:59:06: markers [1], base at (346, -114) mm
+  16:59:07: markers [1], base at (345, -88) mm
+  16:59:08: markers [1], base at (344, -86) mm
+  16:59:09: no markers
+  16:59:10: no markers
+  16:59:11: markers [1], base at (348, -76) mm
+  16:59:12: markers [1], base at (349, -52) mm
+  16:59:13: markers [1], base at (354, -36) mm
+  16:59:14: no markers
+  16:59:15: no markers
+  16:59:16: markers [1], base at (354, 91) mm
+  16:59:17: markers [1], base at (354, 87) mm
+  16:59:18: markers [1], base at (355, 79) mm
+  16:59:19: markers [1], base at (356, 55) mm
+  16:59:20: markers [1], base at (360, 34) mm
+  16:59:21: markers [1], base at (359, 16) mm
+  16:59:22: markers [1], base at (359, 13) mm
+  16:59:23: no markers
+  16:59:24: no markers
+  16:59:25: markers [1], base at (352, 145) mm
+  16:59:26: markers [1], base at (352, 144) mm
+  16:59:27: markers [1], base at (351, 150) mm
+  16:59:28: markers [1], base at (351, 166) mm
+  16:59:29: markers [1], base at (349, 202) mm
+  16:59:30: markers [1], base at (352, 222) mm
+  16:59:31: markers [1], base at (352, 237) mm
+  16:59:32: markers [1], base at (350, 241) mm
+  16:59:33: no markers
+  16:59:34: no markers
+  16:59:35: no markers
+  16:59:36: no markers
+  16:59:37: markers [1], base at (350, 242) mm
+  16:59:38: markers [1], base at (349, 239) mm
+  16:59:39: markers [1], base at (346, 238) mm
+  16:59:40: markers [1], base at (343, 239) mm
+  16:59:41: markers [1], base at (339, 239) mm
+  16:59:42: markers [1], base at (336, 239) mm
+  16:59:43: no markers
+  16:59:44: no markers
+  16:59:45: no markers
+  16:59:46: no markers
+  16:59:47: markers [1], base at (335, 240) mm
+  16:59:48: markers [1], base at (338, 240) mm
+  16:59:49: markers [1], base at (338, 240) mm
+  16:59:50: markers [1], base at (338, 242) mm
+  16:59:51: no markers
+  16:59:52: no markers
+  16:59:53: markers [1], base at (339, 244) mm
+  16:59:54: markers [1], base at (339, 241) mm
+  16:59:55: markers [1], base at (341, 240) mm
+  16:59:56: markers [1], base at (365, 239) mm
+  16:59:57: markers [1], base at (386, 234) mm
+  16:59:58: no markers
+  16:59:59: markers [1], base at (460, 228) mm
+  17:00:00: markers [1], base at (461, 228) mm
+  17:00:01: markers [1], base at (461, 232) mm
+  17:00:02: markers [1], base at (460, 236) mm
+  17:00:03: markers [1], base at (461, 239) mm
+  17:00:04: markers [1], base at (461, 241) mm
+  17:00:05: markers [1], base at (461, 244) mm
+  17:00:06: markers [1], base at (461, 247) mm
+  17:00:07: markers [1], base at (462, 250) mm
+  17:00:08: no markers
+  17:00:09: no markers
+  17:00:10: no markers
+  17:00:11: markers [1], base at (464, 248) mm
+  17:00:12: markers [1], base at (464, 247) mm
+  17:00:13: no markers
+  17:00:14: no markers
+  17:00:15: no markers
+  17:00:16: no markers
+  17:00:17: no markers
+  17:00:18: no markers
+  17:00:19: no markers
+  17:00:20: markers [1], base at (579, 245) mm
+  17:00:21: markers [1], base at (579, 239) mm
+  17:00:22: markers [1], base at (580, 238) mm
+  17:00:23: no markers
+  17:00:24: no markers
+  17:00:25: no markers
+  17:00:26: no markers
+  17:00:27: no markers
+  17:00:28: markers [1], base at (580, 234) mm
+  17:00:29: no markers
+  17:00:30: no markers
+  17:00:31: no markers
+  17:00:32: markers [1], base at (575, 141) mm
+  17:00:33: markers [1], base at (575, 141) mm
+  17:00:34: markers [1], base at (579, 141) mm
+  17:00:35: no markers
+  17:00:36: no markers
+  17:00:37: no markers
+  17:00:38: no markers
+  17:00:39: no markers
+  17:00:40: no markers
+  17:00:41: no markers
+  17:00:42: no markers
+  17:00:43: no markers
+  17:00:44: no markers
+  17:00:45: no markers
+  17:00:46: no markers
+  17:00:47: no markers
+  17:00:48: no markers
+  17:00:49: no markers
+  17:00:50: no markers
+  17:00:51: no markers
+  17:00:52: no markers
+  17:00:53: no markers
+  17:00:54: no markers
+  17:00:55: no markers
+  17:00:56: no markers
+  17:00:57: no markers
+  17:00:58: markers [1], base at (534, 118) mm
+  17:00:59: markers [1], base at (534, 118) mm
+  17:01:00: markers [1], base at (534, 118) mm
+  17:01:01: markers [1], base at (534, 118) mm
+  17:01:02: markers [1], base at (534, 118) mm
+  17:01:03: markers [1], base at (534, 118) mm
+  17:01:04: markers [1], base at (534, 118) mm
+  17:01:05: markers [1], base at (534, 118) mm
+  17:01:06: no markers
+  17:01:07: markers [1], base at (546, 108) mm
+  17:01:08: markers [1], base at (554, 116) mm
+  17:01:09: no markers
+  17:01:10: markers [1], base at (644, 229) mm
+  17:01:11: markers [1], base at (640, 229) mm
+  17:01:12: markers [1], base at (635, 230) mm
+  17:01:13: markers [1], base at (635, 243) mm
+  17:01:14: markers [1], base at (633, 251) mm
+  17:01:15: no markers
+  17:01:16: no markers
+  17:01:17: no markers
+  17:01:18: markers [1], base at (637, 245) mm
+  17:01:19: markers [1], base at (636, 240) mm
+  17:01:20: markers [1], base at (641, 237) mm
+  17:01:21: markers [1], base at (643, 228) mm
+  17:01:22: markers [1], base at (647, 222) mm
+  17:01:23: no markers
+  17:01:24: no markers
+  17:01:25: markers [1], base at (652, 225) mm
+  17:01:26: markers [1], base at (649, 226) mm
+  17:01:27: markers [1], base at (649, 234) mm
+  17:01:28: markers [1], base at (649, 240) mm
+  17:01:29: markers [1], base at (648, 244) mm
+  17:01:30: markers [1], base at (647, 247) mm
+  17:01:31: markers [1], base at (646, 250) mm
+  17:01:32: markers [1], base at (643, 254) mm
+  17:01:33: no markers
+  17:01:34: no markers
+  17:01:35: no markers
+  17:01:36: no markers
+  17:01:37: no markers
+  17:01:38: no markers
+  17:01:39: no markers
+  17:01:40: markers [1], base at (654, 67) mm
+  17:01:41: markers [1], base at (653, 68) mm
+  17:01:42: markers [1], base at (650, 68) mm
+  17:01:43: markers [1], base at (650, 68) mm
+  17:01:44: markers [1], base at (650, 68) mm
+  17:01:45: markers [1], base at (650, 68) mm
+  17:01:46: markers [1], base at (650, 68) mm
+  17:01:47: markers [1], base at (650, 68) mm
+  17:01:48: markers [1], base at (652, 68) mm
+  17:01:49: markers [1], base at (652, 68) mm
+  17:01:50: markers [1], base at (652, 68) mm
+  17:01:51: markers [1], base at (652, 68) mm
+  17:01:52: markers [1], base at (652, 68) mm
+  17:01:53: markers [1], base at (652, 68) mm
+  17:01:54: markers [1], base at (652, 68) mm
+  17:01:55: markers [1], base at (652, 68) mm
+  17:01:56: markers [1], base at (652, 68) mm
+  17:01:57: markers [1], base at (652, 68) mm
+  17:01:58: markers [1], base at (652, 68) mm
+  17:01:59: markers [1], base at (652, 68) mm
+  17:02:00: markers [1], base at (652, 68) mm
+  17:02:01: markers [1], base at (652, 68) mm
+  17:02:02: markers [1], base at (652, 68) mm
+  17:02:03: markers [1], base at (652, 68) mm
+  17:02:04: markers [1], base at (652, 68) mm
+  17:02:05: markers [1], base at (652, 68) mm
+  17:02:06: markers [1], base at (652, 68) mm
+  17:02:07: markers [1], base at (652, 68) mm
+  17:02:08: markers [1], base at (652, 68) mm
+  17:02:09: markers [1], base at (652, 68) mm
+  17:02:10: markers [1], base at (652, 68) mm
+  17:02:11: markers [1], base at (652, 68) mm
+  17:02:12: markers [1], base at (652, 68) mm
+  17:02:13: markers [1], base at (652, 68) mm
+  17:02:14: markers [1], base at (655, 67) mm
+  17:02:15: no markers
+  17:02:16: no markers
+  17:02:17: markers [1], base at (658, 67) mm
+  17:02:18: markers [1], base at (654, 67) mm
+  17:02:19: no markers
+  17:02:20: no markers
+  17:02:21: no markers
+  17:02:22: markers [1], base at (659, -69) mm
+  17:02:23: markers [1], base at (657, -68) mm
+  17:02:24: markers [1], base at (657, -68) mm
+  17:02:25: markers [1], base at (655, -77) mm
+  17:02:26: no markers
+  17:02:27: markers [1], base at (655, -172) mm
+  17:02:28: markers [1], base at (655, -172) mm
+  17:02:29: markers [1], base at (654, -174) mm
+  17:02:30: no markers
+  17:02:31: no markers
+  17:02:32: no markers
+  17:02:33: markers [1], base at (652, -204) mm
+  17:02:34: markers [1], base at (651, -203) mm
+  17:02:35: markers [1], base at (651, -203) mm
+  17:02:36: markers [1], base at (651, -205) mm
+  17:02:37: markers [1], base at (654, -221) mm
+  17:02:38: markers [1], base at (655, -230) mm
+  17:02:39: markers [1], base at (655, -236) mm
+  17:02:40: markers [1], base at (654, -241) mm
+  17:02:41: markers [1], base at (653, -245) mm
+  17:02:42: no markers
+  17:02:43: no markers
+  17:02:44: no markers
+  17:02:45: no markers
+  17:02:46: markers [1], base at (647, -243) mm
+  17:02:47: markers [1], base at (647, -242) mm
+  17:02:48: markers [1], base at (647, -242) mm
+  17:02:49: markers [1], base at (647, -241) mm
+  17:02:50: markers [1], base at (648, -241) mm
+  17:02:51: markers [1], base at (650, -241) mm
+  17:02:52: markers [1], base at (651, -241) mm
+  17:02:53: markers [1], base at (653, -241) mm
+  17:02:54: markers [1], base at (654, -241) mm
+  17:02:55: markers [1], base at (656, -241) mm
+  17:02:56: markers [1], base at (659, -240) mm
+  17:02:57: markers [1], base at (661, -240) mm
+  17:02:58: markers [1], base at (662, -240) mm
+  17:02:59: no markers
+  17:03:00: no markers
+  17:03:01: no markers
+  17:03:02: markers [1], base at (656, -241) mm
+  17:03:03: markers [1], base at (653, -246) mm
+  17:03:04: markers [1], base at (653, -246) mm
+  17:03:05: markers [1], base at (653, -246) mm
+  17:03:06: markers [1], base at (653, -246) mm
+  17:03:07: markers [1], base at (653, -246) mm
+  17:03:08: markers [1], base at (653, -246) mm
+  17:03:09: markers [1], base at (653, -246) mm

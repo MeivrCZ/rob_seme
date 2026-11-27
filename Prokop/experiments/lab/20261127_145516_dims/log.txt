@@ -1,0 +1,18 @@
+lab check 'dims' (no robot); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_145516_dims
+Model dimensions to check (the margins assume each right to its 1 mm rounding, sd 1/sqrt(12) mm: pass within +-1 mm):
+
+  what                                                        model   how
+  puzzle bar: side of the square cross-section               10.0 mm   caliper, anywhere on the bar
+  puzzle: top bar centreline above the pad (base top)       154.4 mm   from the pad to the top bar's centre (top edge - 5 mm)
+  puzzle: open end from the stem's axis (horizontal)         85.0 mm   stem centre to the top bar's open end face
+  puzzle: bend radius (centreline)                           50.0 mm   the bend's inner radius + 5 mm
+  puzzle: jog top above the pad                              44.4 mm   where the vertical run starts to bend
+  puzzle: jog bottom above the pad                           29.4 mm   where the stem starts
+  hoop: hole diameter                                        60.0 mm   caliper, inner
+  hoop: ring outer diameter                                  69.6 mm   caliper, outer
+  hoop: ring thickness                                        6.6 mm   caliper
+  base: marker plane above the table                         64.6 mm   table top to the ArUco stickers' surface
+  ring centre (mid-thickness) above the table at q_home     977.4 mm   robot at q_home: tape from the table to the middle of the ring
+  ring centre in front of the robot axis at q_home          323.0 mm   robot at q_home: horizontal distance robot axis -> ring centre
+
+Write the measured values next to these; differences > 1 mm: tell Prokop (the soft model / wire.py constants would have to change).

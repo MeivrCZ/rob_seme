@@ -1,0 +1,64 @@
+{
+  "rows": [
+    {
+      "what": "puzzle bar: side of the square cross-section",
+      "model_mm": 10.0,
+      "how": "caliper, anywhere on the bar"
+    },
+    {
+      "what": "puzzle: top bar centreline above the pad (base top)",
+      "model_mm": 154.4,
+      "how": "from the pad to the top bar's centre (top edge - 5 mm)"
+    },
+    {
+      "what": "puzzle: open end from the stem's axis (horizontal)",
+      "model_mm": 85.0,
+      "how": "stem centre to the top bar's open end face"
+    },
+    {
+      "what": "puzzle: bend radius (centreline)",
+      "model_mm": 50.0,
+      "how": "the bend's inner radius + 5 mm"
+    },
+    {
+      "what": "puzzle: jog top above the pad",
+      "model_mm": 44.39999999999999,
+      "how": "where the vertical run starts to bend"
+    },
+    {
+      "what": "puzzle: jog bottom above the pad",
+      "model_mm": 29.4,
+      "how": "where the stem starts"
+    },
+    {
+      "what": "hoop: hole diameter",
+      "model_mm": 60.0,
+      "how": "caliper, inner"
+    },
+    {
+      "what": "hoop: ring outer diameter",
+      "model_mm": 69.6,
+      "how": "caliper, outer"
+    },
+    {
+      "what": "hoop: ring thickness",
+      "model_mm": 6.6,
+      "how": "caliper"
+    },
+    {
+      "what": "base: marker plane above the table",
+      "model_mm": 64.60000000000001,
+      "how": "table top to the ArUco stickers' surface"
+    },
+    {
+      "what": "ring centre (mid-thickness) above the table at q_home",
+      "model_mm": 977.3966591477957,
+      "how": "robot at q_home: tape from the table to the middle of the ring"
+    },
+    {
+      "what": "ring centre in front of the robot axis at q_home",
+      "model_mm": 322.9866591478258,
+      "how": "robot at q_home: horizontal distance robot axis -> ring centre"
+    }
+  ]
+}

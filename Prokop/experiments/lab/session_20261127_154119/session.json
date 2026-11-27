@@ -1,0 +1,217 @@
+{
+  "started": "2026-11-27T15:41:19",
+  "sim": false,
+  "host": "rob-crs93",
+  "git": {
+    "head": "3f39f72",
+    "subject": "added lab checking scripts",
+    "dirty": false
+  },
+  "calibration": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_154349.json",
+  "steps": {
+    "1": {
+      "skipped": "by the operator"
+    },
+    "2": {
+      "check": "calibrate",
+      "title": "camera calibration (homography)",
+      "started": "2026-11-27T15:41:35",
+      "exit": 0,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154135_calibrate",
+      "stderr": ">>> Remove the turntable, the base and the puzzle from the work area (the hoop goes down to 75 mm above the table).\n    Enter to start, anything else to abort: \n>>> The hoop visits 27 points at speed 0.2 and returns to q_home.\n    Enter to start, anything else to abort:",
+      "verdict": false,
+      "rows": [
+        {
+          "what": "points recorded",
+          "measured": "18 of 27",
+          "limit": ">= 15",
+          "ok": true
+        },
+        {
+          "what": "held-out RMS [px]",
+          "measured": "4.21",
+          "limit": "< 3",
+          "ok": false
+        },
+        {
+          "what": "held-out RMS in the table plane [mm]",
+          "measured": "0.93",
+          "limit": "< 2",
+          "ok": true
+        },
+        {
+          "what": "RANSAC rejected",
+          "measured": "[]",
+          "limit": "-",
+          "ok": null
+        }
+      ]
+    },
+    "3": {
+      "check": "timing",
+      "title": "timing model on the real robot",
+      "started": "2026-11-27T15:44:21",
+      "exit": 0,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154421_timing",
+      "stderr": ">>> Timing chain without the camera: 5 small moves near q_home at speed 0.5, back to q_home.\n    Enter to start, anything else to abort: \n>>> Timing chain with a camera thread grabbing: 5 small moves near q_home at speed 0.5, back to q_home.\n    Enter to start, anything else to abort:",
+      "verdict": false,
+      "rows": [
+        {
+          "what": "run 1 (no camera): lateness per move [ms]",
+          "measured": "-54, -57, -58, -59, -61",
+          "limit": "abs(median) <= 30",
+          "ok": false
+        },
+        {
+          "what": "run 1 (no camera): lateness median / spread [ms]",
+          "measured": "-58 / 6",
+          "limit": "the same for all moves",
+          "ok": null
+        },
+        {
+          "what": "run 1 (no camera): move_to_q [ms]",
+          "measured": "0-10",
+          "limit": "<= 60",
+          "ok": true
+        },
+        {
+          "what": "run 1 (no camera): get_q period [ms]",
+          "measured": "51",
+          "limit": "40-80",
+          "ok": true
+        },
+        {
+          "what": "run 2 (camera grabbing): lateness per move [ms]",
+          "measured": "-64, -67, -68, -69, -70",
+          "limit": "abs(median) <= 30",
+          "ok": false
+        },
+        {
+          "what": "run 2 (camera grabbing): lateness median / spread [ms]",
+          "measured": "-68 / 6",
+          "limit": "the same for all moves",
+          "ok": null
+        },
+        {
+          "what": "run 2 (camera grabbing): move_to_q [ms]",
+          "measured": "0-0",
+          "limit": "<= 60",
+          "ok": true
+        },
+        {
+          "what": "run 2 (camera grabbing): get_q period [ms]",
+          "measured": "51",
+          "limit": "40-80",
+          "ok": true
+        },
+        {
+          "what": "run 2 (camera grabbing): grab duration [ms]",
+          "measured": "185",
+          "limit": "note only",
+          "ok": null
+        },
+        {
+          "what": "run 2 - run 1: lateness / move_to_q [ms]",
+          "measured": "-10 / -10",
+          "limit": "within ~20",
+          "ok": true
+        }
+      ]
+    },
+    "4": {
+      "check": "turntable",
+      "title": "perception on the spinning turntable",
+      "started": "2026-11-27T15:45:42",
+      "exit": 0,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154542_turntable",
+      "stderr": ">>> The turntable spinning, the base with the puzzle on it, in the camera's view. Nothing moves the robot.\n    Enter to start, anything else to abort:",
+      "verdict": false,
+      "rows": [
+        {
+          "what": "detections",
+          "measured": "10 of 10",
+          "limit": ">= 8",
+          "ok": true
+        },
+        {
+          "what": "period [s]",
+          "measured": "28.70",
+          "limit": "27.9-28.1",
+          "ok": false
+        },
+        {
+          "what": "xy residual [mm]",
+          "measured": "0.17",
+          "limit": "< 2",
+          "ok": true
+        },
+        {
+          "what": "yaw residual [deg]",
+          "measured": "0.50",
+          "limit": "< 1",
+          "ok": true
+        },
+        {
+          "what": "tracker - fit drift [deg/s]",
+          "measured": "0.2612",
+          "limit": "< 0.03",
+          "ok": false
+        },
+        {
+          "what": "markers lost",
+          "measured": "0",
+          "limit": "any",
+          "ok": null
+        },
+        {
+          "what": "axis [mm] / offset [mm] / direction",
+          "measured": "(527.9, -90.0) / 13.2 / -1",
+          "limit": "matches by eye",
+          "ok": null
+        }
+      ],
+      "by_eye": ""
+    },
+    "5": {
+      "check": "fov",
+      "title": "where the camera sees the base",
+      "started": "2026-11-27T15:46:59",
+      "exit": 0,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154659_fov",
+      "stderr": "",
+      "verdict": null,
+      "rows": [
+        {
+          "what": "images with markers",
+          "measured": "100 of 144 (25 with both)",
+          "limit": "-",
+          "ok": null
+        },
+        {
+          "what": "base seen at x [mm]",
+          "measured": "376 to 640",
+          "limit": "work area 337-637",
+          "ok": null
+        },
+        {
+          "what": "base seen at y [mm]",
+          "measured": "-221 to 203",
+          "limit": "work area -242..+242",
+          "ok": null
+        }
+      ],
+      "edges": "along the edges, the work area is a bit smaller I guess"
+    },
+    "6": {
+      "check": "dryrun",
+      "title": "solver dry run (perception + planning, no motion)",
+      "started": "2026-11-27T15:50:07",
+      "exit": 1,
+      "folder": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/runs/20261127_155008",
+      "stderr": "  File \"/home/dvorapro/Desktop/semestralka/rob_seme/.venv/lib/python3.12/site-packages/ctu_crs/crs_robot.py\", line 130, in initialize\n    assert self._mars.check_ready()\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dvorapro/Desktop/semestralka/rob_seme/.venv/lib/python3.12/site-packages/ctu_mars_control_unit/mars_control_unit.py\", line 166, in check_ready\n    raise Exception(\"Check ready: %s.\" % s[:-2])\nException: Check ready: arm power is off.",
+      "verdict": false,
+      "rows": []
+    }
+  },
+  "notes": []
+}

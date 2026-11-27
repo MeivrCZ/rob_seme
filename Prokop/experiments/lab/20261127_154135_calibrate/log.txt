@@ -1,0 +1,34 @@
+lab check 'calibrate' (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_154135_calibrate
+real robot at q_home
+27 of 27 grid points reachable; the route q_home -> points -> q_home is free of the table and the cell (least soft clearance 57 mm)
+  point  0: ring NOT found by the hole detector (; the blue-ring fit found it at (341.9, 125.3) px, not used (--ring-fallback to use it))
+  point  1: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point  2: ring at (325.0, 929.3) px (hole detector), centre [580.0, -150.1, 76.0] mm; the camera model predicts [323.7, 1044.1] px
+  point  3: ring at (938.1, 947.8) px (hole detector), centre [580.0, -0.5, 76.0] mm; the camera model predicts [957.5, 1044.2] px
+  point  4: ring at (945.8, 543.4) px (hole detector), centre [485.0, -0.2, 75.9] mm; the camera model predicts [958.5, 641.7] px
+  point  5: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point  6: ring at (1573.4, 160.2) px (hole detector), centre [390.0, 149.9, 76.0] mm; the camera model predicts [1594.4, 239.6] px
+  point  7: ring at (1569.5, 557.0) px (hole detector), centre [485.1, 149.7, 76.0] mm; the camera model predicts [1593.8, 642.3] px
+  point  8: ring at (1561.3, 950.7) px (hole detector), centre [580.1, 149.8, 76.0] mm; the camera model predicts [1594.0, 1044.5] px
+  point  9: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 10: ring at (312.5, 529.4) px (hole detector), centre [485.0, -150.1, 131.0] mm; the camera model predicts [292.3, 643.9] px
+  point 11: ring at (302.2, 948.0) px (hole detector), centre [580.0, -150.2, 131.1] mm; the camera model predicts [291.7, 1066.1] px
+  point 12: ring at (946.7, 965.0) px (hole detector), centre [580.0, -0.5, 131.0] mm; the camera model predicts [957.3, 1066.3] px
+  point 13: ring at (957.3, 543.1) px (hole detector), centre [485.0, 0.0, 131.0] mm; the camera model predicts [959.6, 643.9] px
+  point 14: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 15: ring NOT found by the hole detector (; the blue-ring fit found it at (1636.3, 135.8) px, not used (--ring-fallback to use it))
+  point 16: ring at (1614.1, 555.3) px (hole detector), centre [484.9, 150.1, 131.0] mm; the camera model predicts [1626.9, 643.7] px
+  point 17: ring at (1596.8, 975.1) px (hole detector), centre [580.1, 149.7, 131.0] mm; the camera model predicts [1624.8, 1066.7] px
+  point 18: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 19: ring at (283.5, 540.4) px (hole detector), centre [485.1, -149.7, 191.1] mm; the camera model predicts [255.7, 647.0] px
+  point 20: ring at (271.5, 980.0) px (hole detector), centre [580.0, -150.1, 191.1] mm; the camera model predicts [254.0, 1092.8] px
+  point 21: ring at (952.4, 996.4) px (hole detector), centre [580.0, -0.5, 191.0] mm; the camera model predicts [957.0, 1093.0] px
+  point 22: ring at (966.9, 551.3) px (hole detector), centre [485.0, 0.3, 191.0] mm; the camera model predicts [961.0, 646.6] px
+  point 23: ring NOT found by the hole detector (; ring fit failed (ValueError))
+  point 24: ring NOT found by the hole detector (; the blue-ring fit found it at (1677.9, 120.3) px, not used (--ring-fallback to use it))
+  point 25: ring at (1660.3, 564.5) px (hole detector), centre [485.1, 149.7, 191.1] mm; the camera model predicts [1663.1, 647.0] px
+  point 26: ring at (1642.4, 1007.4) px (hole detector), centre [580.1, 149.7, 191.0] mm; the camera model predicts [1662.9, 1093.3] px
+
+calibration from 18 points: 12 inliers, rejected (RANSAC) []; on 6 held-out points: 4.21 px RMS, 0.93 mm RMS in the table plane
+saved: /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_154349.json
+use it: uv run Prokop/run_solver.py --real --calibration /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_154349.json

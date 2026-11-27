@@ -1,0 +1,20 @@
+lab check 'timing' (REAL ROBOT); results in /home/dvorapro/Desktop/semestralka/rob_seme/Prokop/experiments/lab/20261127_165230_timing
+real robot at q_home
+the chain (5 moves, joints 1/4/6, at most 12 deg on joint 1) is free of the table and the cell (142 mm)
+
+without the camera (get_q every 51 ms; the lateness fitted over each whole move):
+  move 1: move_to_q   10 ms, arrived   -53 ms against the prediction (sd 8 ms over 9 samples)
+  move 2: move_to_q    0 ms, arrived   -56 ms against the prediction (sd 8 ms over 4 samples)
+  move 3: move_to_q    0 ms, arrived   -57 ms against the prediction (sd 9 ms over 12 samples)
+  move 4: move_to_q    0 ms, arrived   -58 ms against the prediction (sd 1 ms over 9 samples)
+  move 5: move_to_q    0 ms, arrived   -59 ms against the prediction (sd 4 ms over 5 samples)
+  -> arrival error median -57 ms, worst 59 ms (the solver assumes ~0; the simulator: +10 ms, sd 2 ms, without the camera)
+
+with a camera thread grabbing (get_q every 51 ms; the lateness fitted over each whole move):
+  move 1: move_to_q    0 ms, arrived   -64 ms against the prediction (sd 8 ms over 9 samples)
+  move 2: move_to_q    0 ms, arrived   -67 ms against the prediction (sd 8 ms over 4 samples)
+  move 3: move_to_q    0 ms, arrived   -67 ms against the prediction (sd 9 ms over 12 samples)
+  move 4: move_to_q    0 ms, arrived   -69 ms against the prediction (sd 1 ms over 9 samples)
+  move 5: move_to_q    0 ms, arrived   -70 ms against the prediction (sd 4 ms over 5 samples)
+  camera: 25 grabs, 184 ms each
+  -> arrival error median -67 ms, worst 70 ms (the solver assumes ~0; the simulator: +10 ms, sd 2 ms, without the camera)

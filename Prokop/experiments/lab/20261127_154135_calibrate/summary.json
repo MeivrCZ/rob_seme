@@ -1,0 +1,53 @@
+{
+  "recorded": 18,
+  "fit": {
+    "training_count": 12,
+    "inlier_count": 12,
+    "rejected_ids": [],
+    "validation_count": 6,
+    "model": "3x4 pinhole projective matrix (normalized DLT)"
+  },
+  "validation": {
+    "subset": "holdout (independent)",
+    "count": 6,
+    "pixel_rmse": 4.209739763162903,
+    "pixel_mean": 3.6145717499949535,
+    "pixel_max": 7.484177911483551,
+    "xy_rmse_mm": 0.930248942018507,
+    "xy_mean_mm": 0.8084220412091669,
+    "xy_max_mm": 1.6209459166208195,
+    "per_point": [
+      {
+        "point_index": 2,
+        "error_px": 1.1551648689693383,
+        "error_xy_mm": 0.27615856947088147
+      },
+      {
+        "point_index": 7,
+        "error_px": 3.110288192033562,
+        "error_xy_mm": 0.7452692230783046
+      },
+      {
+        "point_index": 12,
+        "error_px": 1.2956695915624574,
+        "error_xy_mm": 0.2990221701628358
+      },
+      {
+        "point_index": 17,
+        "error_px": 4.700716856812261,
+        "error_xy_mm": 1.0575439963619946
+      },
+      {
+        "point_index": 19,
+        "error_px": 3.9414130791085515,
+        "error_xy_mm": 0.8515923715601661
+      },
+      {
+        "point_index": 25,
+        "error_px": 7.484177911483551,
+        "error_xy_mm": 1.6209459166208195
+      }
+    ]
+  },
+  "path": "/home/dvorapro/Desktop/semestralka/rob_seme/Prokop/data/calibration/homography_20261127_154349.json"
+}
