@@ -62,7 +62,8 @@ SUCCESS_HEIGHT = 0.04  # m, the ring must end lower than this above the pad
 # 24.4 mm above (the ring's thickness below or above hoop_center); each 15 deg of tilt
 # lowers its rim by ~9 mm. Together with SUCCESS_HEIGHT it keeps the end nearly flat.
 END_MIN_BOTTOM = 0.015  # m
-RING_OUTER_RADIUS = 0.0348  # m (CAD: models/meshes/hoop.stl)
+RING_OUTER_RADIUS = 0.0345  # m, measured (caliper, lab 2026-11-27: 69.0 mm; CAD hoop.stl 34.8,
+#   which the collision model keeps)
 RING_THICKNESS = 0.0066  # m, the ring lies on the -z side of hoop_center
 
 

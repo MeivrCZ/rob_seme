@@ -8,13 +8,20 @@ room at the joint limits). Now they follow from what the run measured:
   the drift of the fitted speed over the traversal (its sd from the orbit fit's yaw
   residuals and the spread of the measurement times);
 * the turntable's position: the orbit fit's position residual;
+* the camera calibration: its error on its held-out points (lab 2026-11-27: 1.24 mm);
+  the orbit fit's residual is only the scatter, a calibration error shifts every
+  measurement alike (user, 2026-11-28);
+* the turntable's uneven turn: its regulator jerks on part of the turn (lab
+  2026-11-27), a phase error the constant-speed model does not have; the whole-turn
+  fit's yaw residual is that deviation, used as a phase sd (user, 2026-11-28);
 * the dimensions, measured with a 1 mm tape: each a uniform rounding error, sd
   1/sqrt(12) mm (user, 2026-11-26); DIMENSION_PARTS of them add up between the hoop
   and the puzzle (turntable, base, bar, robot position).
 
 Margins, with K_SIGMA = 2 (user: about 95 % per check if the errors are normal):
 
-* hoop against the puzzle: K * sqrt(sd_xy^2 + (reach * sd_angle)^2 + sd_dim^2),
+* hoop against the puzzle: K * sqrt(sd_xy^2 + sd_cal^2 + (reach * sd_angle)^2 + sd_dim^2),
+  sd_angle = sqrt(PHASE_SD^2 + (sd_omega * traversal)^2 + yaw_rmse^2),
   reach = how far the task reaches from the turntable axis (the worst point);
 * joint limits: every configuration of the plan keeps K * sd_angle * JOINT_GAIN +
   LIMIT_RESERVE from its limits, so that the executor's correction (the target turned
@@ -62,10 +69,13 @@ class Margins:
     sd_xy: float  # m
     sd_omega: float  # rad/s
     reach: float  # m
+    sd_calibration: float = 0.0  # m
+    sd_uneven: float = 0.0  # rad, the fit's yaw residual (the turntable's uneven turn)
 
     @staticmethod
     def from_fit(xy_rmse: float, yaw_rmse: float, times: np.ndarray, reach: float,
-                 traversal: float = TRAVERSAL_GUESS) -> "Margins":
+                 traversal: float = TRAVERSAL_GUESS, calibration_sd: float = 0.0
+                 ) -> "Margins":
         """From the orbit fit's residuals and its measurement times [s].
 
         Args:
@@ -74,22 +84,25 @@ class Margins:
             times: Capture times of the fitted measurements [s].
             reach: Largest distance of the task from the turntable axis [m].
             traversal: Time from the freeze to the end of the traversal [s].
+            calibration_sd: The camera calibration's error (held-out RMS) [m].
         """
         t = np.asarray(times, float)
         spread = float(np.sum((t - t.mean()) ** 2))
         sd_omega = max(MIN_OMEGA_SD, yaw_rmse / np.sqrt(spread) if spread > 0 else np.inf)
-        sd_angle = float(np.hypot(PHASE_SD, sd_omega * traversal))
-        sd_point = float(np.hypot(xy_rmse, reach * sd_angle))
+        sd_angle = float(np.sqrt(PHASE_SD ** 2 + (sd_omega * traversal) ** 2 + yaw_rmse ** 2))
+        sd_point = float(np.sqrt(xy_rmse ** 2 + calibration_sd ** 2 + (reach * sd_angle) ** 2))
         sd_total = float(np.hypot(sd_point, DIMENSION_SD_TOTAL))
         return Margins(hoop_puzzle=max(MIN_HOOP_PUZZLE, K_SIGMA * sd_total),
                        joint_limit=K_SIGMA * sd_angle * JOINT_GAIN + LIMIT_RESERVE,
                        sd_angle=sd_angle, sd_xy=float(xy_rmse), sd_omega=float(sd_omega),
-                       reach=float(reach))
+                       reach=float(reach), sd_calibration=float(calibration_sd),
+                       sd_uneven=float(yaw_rmse))
 
     def describe(self) -> str:
         return (f"hoop-puzzle {1000 * self.hoop_puzzle:.1f} mm, joint limits "
                 f"{np.rad2deg(self.joint_limit):.1f} deg (k = {K_SIGMA:g}: angle sd "
                 f"{np.rad2deg(self.sd_angle):.2f} deg incl. speed sd "
-                f"{np.rad2deg(self.sd_omega):.3f} deg/s over {TRAVERSAL_GUESS:.0f} s, position sd "
-                f"{1000 * self.sd_xy:.2f} mm, reach {1000 * self.reach:.0f} mm, dimensions sd "
+                f"{np.rad2deg(self.sd_omega):.3f} deg/s over {TRAVERSAL_GUESS:.0f} s and uneven "
+                f"turn {np.rad2deg(self.sd_uneven):.2f} deg, position sd "
+                f"{1000 * self.sd_xy:.2f} mm, calibration {1000 * self.sd_calibration:.2f} mm, reach {1000 * self.reach:.0f} mm, dimensions sd "
                 f"{1000 * DIMENSION_SD_TOTAL:.2f} mm)")

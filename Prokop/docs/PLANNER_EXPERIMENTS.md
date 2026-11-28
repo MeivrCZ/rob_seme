@@ -759,6 +759,77 @@ process: plans for 13 of 20 in **59–277 s** (median ~120 s), threaded at 12–
 traversal, back out at 27–35 s, least clearance 1.0–9.1 mm. Of the 11 seen in batch 6 he
 solves 8 (ours 9); his solve seeds 5 and 12 (ours not), ours 4, 8, 15 (his not).
 
+### 9.14 The first lab session on the real robot (2026-11-27) and what changed after it
+
+**Checks** (`tools/lab_check.py`, `tools/lab_session.py`; `experiments/lab/`): the puzzle's
+heights, measured from the white plate, are the CAD's (top bar 155.0, jog 44.75 / 30.0
+mm; the check had shown them from the top of the 0.6 mm marker relief, now from the
+plate); the hoop's outer diameter 69.0 mm (CAD 69.6: `wire.RING_OUTER_RADIUS` 34.5 mm for
+the end-pose heights, the collision model keeps the CAD hoop); the marker plane 67.0 mm
+above the table (model 64.6: `BASE_FOAM` 27.4 mm). The measured values are kept in
+`data/measured_dims.json` (the dims step offers them; Enter keeps, '-' clears); calibration 22/27 points, 1.24 mm (5.3 px) on the held-out
+points; the arrivals **57 ms early** (spread 6 ms; a grabbing camera thread changes it by
+10 ms only: no interference); period 27.89 s, the tracker drifts 0.064 deg/s from the
+10-image fit; the base seen over the whole work area.
+
+**Runs** (`runs/20261127_*`, 8-image perception): 20 traversals executed, all within 120 s
+(36–102 s); physically **16 succeeded, 2 missed the threading, 2 touched the puzzle**.
+15 runs stopped at perception (0–3 detections), 4 had no plan (all with 4–5 detections:
+periods 25.2–28.5 s, margins 9.5–20 mm). Observed: the waiting hoop cleared the turning
+top bar by ~1 mm, the first move put the bar a few mm from the top of the hole (the
+plans keep 0.5–7 mm beyond the margin: the planner takes the first path that fits),
+one end move pushed the hoop's handle against the base, and the turntable jerks on part
+of its turn (its regulator). The largest phase errors were the runs whose tracker froze
+on an old angle with a poor 8-image speed (161404: 28.78 s, 10.9 s old: ~6.7 deg;
+161551: 4 detections, 8.6 s old: ~4.1 deg).
+
+**Changes:** at the lab: perception over a whole turn (29 images), the end pose's ring
+bottom >= 15 mm above the pad (`END_MIN_BOTTOM`), the hoop 15 mm from the base and the
+foot (`HOOP_BASE_MARGIN`). After it (user, 2026-11-28):
+* `COMMAND_DELAY` 0.12 → **0.063 s** (planner and simulator): the measured arrivals; the
+  tool's ±10 ms check missed twice by exactly −10 ms (changing the delay also moves
+  the send times, the fixed point is near 0.05 s); 57 ms were ~0.7 deg, ~1.3 mm at the
+  hoop, in every run.
+* Margins (`solver/uncertainty.py`): + the calibration's held-out RMS as a position sd
+  (`run_solver.calibration_sd`, 0 for the simulator's exact one), + the whole-turn
+  fit's yaw residual as a phase sd (the uneven turn). The dry run's placement: hoop
+  margin 4.6 → 5.4 mm.
+* A stale tracker (`run_solver.FreezingExecutor`): if its last angle is older than
+  `STALE_LIMIT` (2 s) at the freeze, wait one more turn for a fresh one when the
+  attempt still ends in time (`STALE_EXTRA_TURNS` = 1), else go on it with a warning.
+
+* **Time before the wait** (one lab run aborted "time limit at step 0" after waiting for
+  its angle): in the 20 executed runs, phase 3 took 5.4–18.8 s (median 8.5) from its start
+  to the wait, against the predicted `EXEC_OVERHEAD` (4 s) + the approach, ~6–8 s; mostly
+  absorbed by the wait (the ends within 1 s of the prediction), but 160444's start angle
+  had just passed: 26.7 s of waiting, the end 28 s after the prediction. The largest,
+  least predictable part: the camera tracker's start-up (`wait_ready`, up to 15 s with
+  the markers hidden). Changes (user): the tracker is started right after perception
+  (`start_camera_tracker`; ready during planning: 0.00 s left to wait in the simulator,
+  planning not slower), and `predicted_end` counts a start angle coming round less than
+  `START_SLACK` (3 s) after the predicted ready time as a turn later. Phase 3 logs the
+  camera's remaining start-up and the approach's real vs modelled time (simulator: 8.86
+  vs 8.72 s), to set `EXEC_OVERHEAD` from the next lab's runs.
+
+* With the tracker started early, phase 3 needs only 0.24–0.64 s beyond the approach
+  (simulator): `EXEC_OVERHEAD` 4 → **1 s** (with the 4 s and the slack the prediction was a
+  turn too pessimistic: 108.7 s predicted, 81.2 s real; `accept` could reject plans that
+  end in time). Measured at the lab by `lab_session.py` step 7 (`run_solver.py
+  --stop-before-traversal`: the solver up to the wait, then back along the approach).
+* **The plan queue** (user): the plans found (the first and those within its 15 s window)
+  ordered robust before fast: last the plans within 3 deg of a joint limit (the
+  executor's corrections could reach it); before them [fast, far from singularities],
+  [fast, near], [slow, far], [slow, near], fast = ends within a turn of the soonest,
+  near = sigma_min < 10 mm (the lab's candidates: 0.2–1 or 13–55 mm); inside a group
+  the most clearance beyond the hoop margin, then the sooner end (`run_solver.phase2_prokop`
+  `order`, `planner.plan_spinning(order=)`). Logged and saved in summary.json; only the
+  first is executed. Seed 3: the plan that would end soonest went last (1.4 mm against
+  2.6 mm).
+
+Still open: the ~4 mm static error the waiting hoop showed (calibration, the hoop's
+magnetic mount, the puzzle's real shape: a static gap test at the next lab), and plans
+that keep more than the margin when they can (the ranking does not look at clearance).
+
 ## 10. Open ideas (not built yet)
 
 - **Compiling more of the planner** (planning time, 9.13): the IK, the continuous checks'

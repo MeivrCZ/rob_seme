@@ -28,7 +28,7 @@ from dataclasses import dataclass
 import numpy as np
 
 # Measured on the CRS93 (docs/MEASUREMENTS.md); the same values as CRS93Sim.
-COMMAND_DELAY = 0.12  # s, move_to_q call -> the joints start moving
+COMMAND_DELAY = 0.063  # s, move_to_q call -> the joints start moving (effective, for the arrivals: lab 2026-11-27, tools/measure_command_delay.py; E5 had 0.12)
 SEND_DELAY = 0.025  # s, move_to_q blocks (serial write)
 BLEND_TOL = 1e-3  # unit joint-space directions closer than this blend
 

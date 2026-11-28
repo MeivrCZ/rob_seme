@@ -1,0 +1,32 @@
+{
+  "puzzle bar: side of the square cross-section": {
+    "mm": 10.0,
+    "date": "2026-11-27T15:31:16",
+    "session": "session_20261127_153036"
+  },
+  "puzzle: top bar centreline above the white plate": {
+    "mm": 155.0,
+    "date": "2026-11-27T16:40:18",
+    "session": "session_20261127_164015"
+  },
+  "puzzle: jog top above the white plate": {
+    "mm": 44.75,
+    "date": "2026-11-27T16:40:18",
+    "session": "session_20261127_164015"
+  },
+  "puzzle: jog bottom above the white plate": {
+    "mm": 30.0,
+    "date": "2026-11-27T16:40:18",
+    "session": "session_20261127_164015"
+  },
+  "hoop: ring outer diameter": {
+    "mm": 69.0,
+    "date": "2026-11-27T16:40:18",
+    "session": "session_20261127_164015"
+  },
+  "base: marker plane above the table": {
+    "mm": 67.0,
+    "date": "2026-11-27T16:40:18",
+    "session": "session_20261127_164015"
+  }
+}

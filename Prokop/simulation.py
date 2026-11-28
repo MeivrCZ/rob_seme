@@ -73,7 +73,7 @@ from view_models import SceneViewer
 
 RENDER_FPS = 30.0
 # Hardware delays [s], measured on the CRS93 (docs/MEASUREMENTS.md).
-COMMAND_DELAY = 0.12  # move_to_q call -> the joints start moving
+COMMAND_DELAY = 0.063  # move_to_q call -> the joints start moving (= solver.timing.COMMAND_DELAY; lab 2026-11-27)
 SEND_DELAY = 0.025  # move_to_q blocks (serial write of the command)
 QUERY_DELAY = 0.05  # get_q round trip
 STATUS_DELAY = 0.01  # in_motion round trip

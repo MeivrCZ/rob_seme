@@ -71,7 +71,7 @@ All are measured with `tools/log_motion.py` (E5, E6) and are the defaults of
 | Joint speeds | match the `ctu_crs` settings (IRC·256/ms) within 0.1°/s: j1 17.6°/s at relative speed 0.25, 29.8°/s at 0.5; j4 58.8°/s, j6 147.1°/s at 0.5 | measured | `CRS93Sim._joint_limits_rad` |
 | Accelerations | 170–390°/s² (j1), 276°/s² (j4), 3500°/s² (j6); the sim's assumed units (IRC·256/ms²) give 140–180, 283, 3400 | measured (to about ×2: a ramp lasts 1–2 samples) | `CRS93Sim._joint_limits_rad` |
 | Motion profile | coordinated: all joints start and stop together, trapezoidal speed | measured | `simulation.Segment` |
-| Start of motion after `move_to_q` | 93–147 ms, mean 126 ms → 0.12 s | measured (profile fit) | `simulation.COMMAND_DELAY` |
+| Start of motion after `move_to_q` | 93–147 ms, mean 126 ms → 0.12 s (E5, profile fit); **effective 0.063 s** for the arrivals: the lab of 2026-11-27 timed the executor's own pattern (moves sent 0.15 s before the previous ends) and the arrivals were 57 ms early with 0.12 s (spread 6 ms, twice), 10 ms early with 0.063 s (`tools/measure_command_delay.py`; the start of motion and the profile cannot both be right, the arrivals are what the executor needs) | measured | `solver.timing.COMMAND_DELAY`, `simulation.COMMAND_DELAY` |
 | `move_to_q` blocks | ~25 ms per call (serial write) | measured | `simulation.SEND_DELAY` |
 | `get_q` round trip | 51 ms median (41–154 ms) | measured | `simulation.QUERY_DELAY` |
 | `in_motion` round trip | ~10 ms | measured (loop period − `get_q`) | `simulation.STATUS_DELAY` |

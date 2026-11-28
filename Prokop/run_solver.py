@@ -88,8 +88,23 @@ RUN_LIMIT = 120.0  # s, program start -> hoop < 4 cm above the base, threaded (a
 # its predicted end (with its real wait for its start angle) is within RUN_LIMIT.
 APPROACH_MIN = 2.0  # s
 TRAVERSAL_MIN = 4.0  # s
-EXEC_OVERHEAD = 4.0  # s, camera tracker ready + LEAD + compute budget (measured: see logs)
+# s, phase 3's time before its wait beyond the modelled approach (camera tracker ready,
+# the approach's settling, LEAD, the compute budget). 4 s while the camera tracker started
+# in phase 3; started after perception it is ~0.6 s in the simulator (2026-11-28): 1 s
+# until the lab measures it (lab_session step 7, run_solver --stop-before-traversal).
+EXEC_OVERHEAD = 1.0
 TIME_MARGIN = 3.0  # s
+# The prediction counts a start angle that comes round less than this after the predicted
+# ready time as a turn later: phase 3 got ready 1-3 s later than predicted at the lab
+# (2026-11-27; twice 7-11 s), and a start angle just missed costs a whole turn (user,
+# 2026-11-28).
+START_SLACK = 3.0  # s
+# The plan queue (phase2_prokop's order, user 2026-11-28):
+QUEUE_LIMIT_NEAR = np.deg2rad(3.0)  # rad, a plan this close to a joint limit goes last
+QUEUE_SINGULAR_NEAR = 0.010  # m, sigma_min below this: near a singularity (the lab's
+#                               candidates were either 0.2-1 mm or 13-55 mm)
+STALE_LIMIT = 2.0  # s, the camera tracker's last angle older than this at the freeze: stale
+STALE_EXTRA_TURNS = 1  # turns waited at most for a fresh angle (if the attempt still ends in time)
 PLAN_PHASES = 6  # start phases handed to the planner (an even grid over a turn)
 # Perception watches a whole turn (user, after the lab of 2026-11-27: 10 images over 9 s
 # gave periods of 27.89 and 28.70 s and the tracker drifted 0.06-0.26 deg/s from the
@@ -179,6 +194,18 @@ class Truth:
 
     def stop(self) -> None:
         pass
+
+
+def calibration_sd(calibration: Homography) -> float:
+    """The calibration's error in the table plane [m]: its RMS on the held-out points
+    (Homography.validate); 0 without held-out points (the simulator's exact one)."""
+    try:
+        check = calibration.validate()
+    except Exception:  # noqa: BLE001 - no held-out points / no samples
+        return 0.0
+    if not check.get("count") or "holdout" not in str(check.get("subset", "")):
+        return 0.0
+    return 1e-3 * float(check["xy_rmse_mm"])
 
 
 def simulated_calibration() -> Homography:
@@ -367,7 +394,10 @@ def predicted_end(timing, model: TurntableModel, theta_start: float, result,
                    for a, b in zip(path, path[1:]))
     t_ready = t_now + EXEC_OVERHEAD + approach
     ahead = ((theta_start - model.theta_at(t_ready)) * model.direction) % (2 * np.pi)
-    return t_ready + ahead / model.omega + float(result.arrivals[-1])
+    wait = ahead / model.omega
+    if wait < START_SLACK:  # a little late and the start angle is gone: a turn later
+        wait += 2 * np.pi / model.omega  # (lab 2026-11-27: run 160444, +28 s)
+    return t_ready + wait + float(result.arrivals[-1])
 
 
 def phase2_prokop(kin: CRS93, model: TurntableModel, speed: float, log: Log,
@@ -375,9 +405,9 @@ def phase2_prokop(kin: CRS93, model: TurntableModel, speed: float, log: Log,
                   fit: dict | None = None) -> tuple[Plan, PuzzlePath]:
     """Prokop's planner: the wire backwards in time from end angles (in parallel), then
     the approach from q_home clear of the swept volume. Planning stops when the rest
-    could no longer finish within RUN_LIMIT of t_base; of the plans found, the one that
-    ends soonest is taken (enough joint-limit room first, the distance from the
-    singularities between plans ending within a second of each other)."""
+    could no longer finish within RUN_LIMIT of t_base; the plans found (the first one and
+    those within its window) are put in a priority queue (order, below: robust before
+    fast) and the first is taken."""
     from solver import planner
     from solver.planner import FACE_NAMES, plan_approach, plan_spinning
     from solver.soft_collision import SoftScene
@@ -386,7 +416,8 @@ def phase2_prokop(kin: CRS93, model: TurntableModel, speed: float, log: Log,
     margins = None
     if fit is not None:  # the run's uncertainties -> the margins (k sigma)
         margins = Margins.from_fit(fit["xy_rmse_m"], fit["yaw_rmse_rad"], fit["times"],
-                                   reach=SoftScene(model).task_reach(0.0))
+                                   reach=SoftScene(model).task_reach(0.0),
+                                   calibration_sd=fit.get("calibration_sd_m", 0.0))
         log(f"P2: margins from the uncertainties: {margins.describe()}")
         record["margins"] = {"hoop_puzzle_mm": 1000 * margins.hoop_puzzle,
                              "joint_limit_deg": float(np.rad2deg(margins.joint_limit)),
@@ -431,11 +462,30 @@ def phase2_prokop(kin: CRS93, model: TurntableModel, speed: float, log: Log,
         to_start = t_go - (now + EXEC_OVERHEAD + approach)  # until its angle comes round
         return min(planner.BW_SCORE_WINDOW, to_start - 1.0, t_limit - TIME_MARGIN - end - 1.0)
 
-    def rank(theta, r):
-        end = predicted_end(timing, model, theta, r, time.monotonic())
-        r.predicted_end = end
-        sigma, _ = r.quality  # the joint-limit margin is kept by every plan (margins)
-        return (end <= t_limit, -round(end), sigma)
+    def order(usable):
+        """The priority queue of the plans (user, 2026-11-28): the robust and fast first.
+
+        Groups in this order: [fast, far from singularities], [fast, near], [slow, far],
+        [slow, near], and last, only for the worst case, the plans within
+        QUEUE_LIMIT_NEAR of a joint limit (the executor's corrections could run them into
+        it). Fast = predicted to end within a turn of the soonest plan; near a
+        singularity = sigma_min below QUEUE_SINGULAR_NEAR. Inside a group: the largest
+        least clearance beyond the hoop margin first, then the sooner end."""
+        now = time.monotonic()
+        period = 2 * np.pi / model.omega
+        items = []
+        for theta, r in usable:
+            r.predicted_end = predicted_end(timing, model, theta, r, now)
+            items.append((theta, r))
+        soonest = min(r.predicted_end for _, r in items)
+        for _, r in items:
+            sigma, room = r.quality
+            r.queue_groups = (bool(room < QUEUE_LIMIT_NEAR),
+                              bool(r.predicted_end > soonest + period),
+                              bool(sigma < QUEUE_SINGULAR_NEAR))
+        # inside a group: the most clearance (to 0.1 mm), then the sooner end
+        return sorted(items, key=lambda u: (u[1].queue_groups,
+                                            -round(u[1].min_clearance, 4), u[1].predicted_end))
 
     def progress(theta_end, r):
         quality = getattr(r, "quality", None)
@@ -448,7 +498,7 @@ def phase2_prokop(kin: CRS93, model: TurntableModel, speed: float, log: Log,
 
     theta_start, result = plan_spinning(kin, timing, model, progress=progress,
                                         approach_from=kin.q_home, deadline=plan_deadline,
-                                        rank=rank, margins=margins, accept=accept,
+                                        order=order, margins=margins, accept=accept,
                                         window=window)
     if result is None:
         raise PhaseFailed(f"no plan that ends within {RUN_LIMIT:.0f} s "
@@ -463,15 +513,38 @@ def phase2_prokop(kin: CRS93, model: TurntableModel, speed: float, log: Log,
         f"traversal {result.arrivals[-1]:.1f} s, tilts "
         f"{np.round(np.rad2deg(result.orientations[:, 1])).astype(int).tolist()} deg, least "
         f"soft clearance {mm(result.min_clearance)}")
-    end = predicted_end(timing, model, theta_start, result, time.monotonic())
+    t_pred = time.monotonic()
+    end = predicted_end(timing, model, theta_start, result, t_pred)
     log(f"  predicted end {end - t_base:.1f} s after the start (limit {RUN_LIMIT:.0f} s)")
     record["plan"]["predicted_end_s"] = round(end - t_base, 1)
-    if getattr(result, "candidates", None):
-        log(f"  chosen from {len(result.candidates)} plan(s): the soonest end (then the "
-            f"farthest from singularities): end angle {deg(result.theta_end)}")
-        record["plan"]["candidates"] = [
-            {"end_angle_deg": float(np.rad2deg(a)), "sigma_min_mm": 1000 * q[0],
-             "limit_margin_deg": float(np.rad2deg(q[1]))} for a, q in result.candidates]
+    # For phase 3's check of EXEC_OVERHEAD: when the prediction was made, its approach
+    # time and its start (the turntable at the start angle).
+    approach_path = [np.asarray(q) for q in result.approach]
+    record["plan"]["predicted_at_s"] = round(t_pred - t_base, 3)
+    record["plan"]["approach_model_s"] = round(sum(
+        timing.move_duration(a, b) + timing.command_delay
+        for a, b in zip(approach_path, approach_path[1:])), 3)
+    record["plan"]["predicted_start_s"] = round(end - float(result.arrivals[-1]) - t_base, 3)
+    queue = getattr(result, "queue", None)
+    if queue:
+        log(f"  the queue of {len(queue)} plan(s) (near the joint limits last; fast before "
+            f"slow; far from singularities first; then the most clearance):")
+        record["plan"]["queue"] = []
+        for i, (theta_q, r) in enumerate(queue):
+            near_limit, slow, singular = r.queue_groups
+            sigma, room = r.quality
+            log(f"    {i + 1}. end angle {deg(r.theta_end)}: "
+                f"{'slow' if slow else 'fast'}, {'NEAR' if singular else 'far from'} a "
+                f"singularity (sigma_min {1000 * sigma:.1f} mm), "
+                f"{'NEAR THE JOINT LIMITS, ' if near_limit else ''}joint room "
+                f"{np.rad2deg(room):.1f} deg, least clearance {mm(r.min_clearance)} beyond "
+                f"the margin, ends {r.predicted_end - t_base:.1f} s after the start")
+            record["plan"]["queue"].append({
+                "end_angle_deg": float(np.rad2deg(r.theta_end)), "slow": slow,
+                "near_singularity": singular, "near_joint_limit": near_limit,
+                "sigma_min_mm": 1000 * sigma, "joint_room_deg": float(np.rad2deg(room)),
+                "clearance_mm": 1000 * r.min_clearance,
+                "predicted_end_s": round(r.predicted_end - t_base, 1)})
     if not record["plan"]["end_pose_waits"]:
         log("  WARNING: no final pose stays clear of the turning puzzle: after the end the "
             "puzzle will hit the arm (harmless: hollow puzzle on foam, magnetic hoop)")
@@ -521,10 +594,72 @@ class FreezingExecutor(Executor):
     jumping when the markers were lost and found skipped: the traversal then ran on
     the live camera tracker and aborted on its uncertainty (batch seed 5)."""
 
+    no_traversal = False  # --stop-before-traversal: approach, wait, then back to q_home
+    t_ready = t_go = approach_s = None  # the timeline, for phase 3's timing check
+
+    def run(self) -> ExecutionResult:
+        if not self.no_traversal:
+            return super().run()
+        if not self.plan.feasible:
+            return ExecutionResult(False, f"unreachable: {self.plan.reason}")
+        self.t_attempt = self.clock()
+        self.robot.set_speed_relative(self.plan.speed)
+        self.approach()
+        self.wait_for_phase()
+        # Back the way it came: the approach is clear of the whole turn's swept volume,
+        # so are the same moves in reverse (straight joint moves through the same poses).
+        self.log("--stop-before-traversal: no traversal; back along the approach to q_home")
+        for q in reversed([np.asarray(q) for q in self.plan.approach]):
+            self.robot.move_to_q(q)
+        self.robot.move_to_q(self.robot.q_home)
+        self.robot.wait_for_motion_stop()
+        return ExecutionResult(True, "stopped before the traversal", t_end=self.clock())
+
+    def approach(self) -> None:
+        """The approach, timed against the model predicted_end uses (to set EXEC_OVERHEAD
+        from the lab runs: phase 3's time before the wait = the camera's start-up, logged
+        by phase3_execute, + this)."""
+        path = [np.asarray(self.robot.get_q())] + [np.asarray(q) for q in self.plan.approach] \
+            + [np.asarray(self.plan.q_start)]
+        model_s = sum(self.timing.move_duration(a, b) + self.timing.command_delay
+                      for a, b in zip(path, path[1:]))
+        t0 = self.clock()
+        super().approach()
+        self.approach_s = self.clock() - t0
+        self.log(f"approach: {self.approach_s:.2f} s ({len(path) - 1} moves; the timing "
+                 f"model {model_s:.2f} s)")
+
     def wait_for_phase(self) -> float:
+        self.t_ready = self.clock()
+        t_go = self.wait_for_phase_inner()
+        self.t_go = t_go
+        return t_go
+
+    def wait_for_phase_inner(self) -> float:
         t_go = self.next_start_time(self.clock() + LEAD)
         self.log(f"Waiting {t_go - self.clock():.1f} s for the turntable phase")
         self._sleep_until(t_go - LEAD)
+        # A stale last angle (the markers hidden before the start; lab 2026-11-27: up to
+        # 11 s old, the runs with the largest phase errors): wait another turn for a
+        # fresh one if the attempt still ends in time (user, 2026-11-28); the waiting
+        # pose is clear of the whole turn's swept volume.
+        for _ in range(STALE_EXTRA_TURNS):
+            if not isinstance(self.tracker, FreezingTracker):
+                break
+            est = self.tracker.camera.estimate()
+            age = self.clock() - est.t
+            if age <= STALE_LIMIT:
+                break
+            later = self.next_start_time(t_go + 1.0)
+            traversal = float(self.plan.steps[-1].t_rel)
+            if self.deadline is not None and later + traversal > self.deadline - TIME_MARGIN:
+                self.log(f"camera tracker: its last angle is {age:.1f} s old (> {STALE_LIMIT:g} s), "
+                         f"but another turn would end too late: going on it")
+                break
+            self.log(f"camera tracker: its last angle is {age:.1f} s old (> {STALE_LIMIT:g} s): "
+                     f"waiting one more turn ({later - self.clock():.1f} s) for a fresh one")
+            t_go = later
+            self._sleep_until(t_go - LEAD)
         if isinstance(self.tracker, FreezingTracker):
             est = self.tracker.freeze()
             self.log(f"camera tracker stopped for the traversal: the fitted model from its "
@@ -683,24 +818,47 @@ class ExecutionProbe:
                 log(f"  the tracker's last estimate before the end: error {np.rad2deg(err):+.2f} deg")
 
 
+def start_camera_tracker(robot, model: TurntableModel, calibration: Homography):
+    """Vojtech's CameraPhaseTracker on the fitted model, started (its thread grabbing).
+
+    run_solver starts it right after perception, so that it is ready by the execution:
+    its start-up (confirming the rotation in new images: up to its 15 s timeout when the
+    markers are hidden) was the largest and least predictable part of phase 3's time
+    before the wait (lab 2026-11-27; user, 2026-11-28). The camera and the robot are
+    idle while planning runs in the worker processes."""
+    from advanced_aruco import AdvancedArucoFinder
+    from camera_phase_tracker import CameraPhaseTracker
+    camera = CameraPhaseTracker(AdvancedArucoFinder(ArucoBlockDetector(), calibration, model),
+                                robot.grab_image, robot.camera_delay)
+    camera.__enter__()
+    return camera
+
+
 def phase3_execute(robot, model: TurntableModel, plan: Plan, path: PuzzlePath, log: Log,
                    truth: Truth | None, record: dict, tracker_kind: str = "fitted",
                    calibration: Homography | None = None,
-                   out: Path | None = None, t_base: float = T_SCRIPT) -> ExecutionResult:
-    """Executor with a tracker; then, on the simulator, the hoop vs the true puzzle."""
-    camera = watch_stop = None
+                   out: Path | None = None, t_base: float = T_SCRIPT,
+                   camera=None, prediction: dict | None = None,
+                   no_traversal: bool = False) -> ExecutionResult:
+    """Executor with a tracker; then, on the simulator, the hoop vs the true puzzle.
+
+    camera: a CameraPhaseTracker already running (start_camera_tracker); else started here.
+    prediction: phase 2's record["plan"] (predicted_at_s, approach_model_s,
+    predicted_start_s): the timeline is checked against it (EXEC_OVERHEAD).
+    no_traversal: --stop-before-traversal (approach, wait, back to q_home)."""
+    watch_stop = None
     probe = ExecutionProbe(robot, model, truth) if truth is not None else None
     if tracker_kind == "camera":
-        from advanced_aruco import AdvancedArucoFinder
-        from camera_phase_tracker import CameraPhaseTracker
-        log("P3.1: tracker = CameraPhaseTracker (Vojtech): measures the base while it works")
-        camera = CameraPhaseTracker(AdvancedArucoFinder(ArucoBlockDetector(), calibration, model),
-                                    robot.grab_image, robot.camera_delay)
-        camera.__enter__()
+        log("P3.1: tracker = CameraPhaseTracker (Vojtech): measures the base while it works"
+            + (" (running since the end of perception)" if camera is not None else ""))
+        if camera is None:
+            camera = start_camera_tracker(robot, model, calibration)
+        t_wait = time.monotonic()
         if not camera.wait_ready(timeout=15.0):
             camera.__exit__(None, None, None)
             raise PhaseFailed("camera tracker: no confirmed rotation within 15 s")
-        log("  camera tracker ready")
+        record["camera_ready_wait_s"] = round(time.monotonic() - t_wait, 2)
+        log(f"  camera tracker ready (waited {time.monotonic() - t_wait:.2f} s for it here)")
         watch_stop = threading.Event()
         threading.Thread(target=watch_tracker, args=(camera, watch_stop, log), daemon=True).start()
         tracker = FreezingTracker(camera, model)
@@ -711,9 +869,11 @@ def phase3_execute(robot, model: TurntableModel, plan: Plan, path: PuzzlePath, l
         probe.watch(camera if camera is not None else tracker)
     executor = FreezingExecutor(robot, model, plan, tracker, RobotTiming(robot, plan.speed),
                                 log=log, deadline=t_base + RUN_LIMIT)
+    executor.no_traversal = no_traversal
     result = None
     try:
         result = executor.run()
+        timeline_check(executor, prediction, t_base, log, record)
     except Exception as error:  # e.g. simulation.CollisionError
         record["collision"] = f"{type(error).__name__}: {error}"
         raise PhaseFailed(record["collision"]) from error
@@ -723,22 +883,48 @@ def phase3_execute(robot, model: TurntableModel, plan: Plan, path: PuzzlePath, l
         if camera is not None:
             watch_stop.set()
             camera.__exit__(None, None, None)
-        if probe is not None:
+        if probe is not None and not no_traversal:
             probe.report(robot, plan, result, log, out or RUNS)
             probe.dump(robot, plan, result, executor, (out or RUNS) / "execution.pkl")
             log(f"  saved for experiments/execution_replay.py: {(out or RUNS) / 'execution.pkl'}")
-        if truth is not None:
+        if truth is not None and not no_traversal:
             evaluate_traversal(robot, path, executor.t_attempt,
                                result.steps if result else [], truth, log, record)
     record.update(success=result.success, reason=result.reason, steps_sent=len(result.steps))
     if result.t_end is not None:
         total = result.t_end - t_base
         record["end_after_start_s"] = round(total, 1)
-        log(f"Time: the traversal ended {total:.1f} s after the start "
-            f"({'within' if total <= RUN_LIMIT else 'OVER'} the {RUN_LIMIT:.0f} s limit)")
+        if no_traversal:
+            log(f"Time: back in q_home {total:.1f} s after the start (no traversal)")
+        else:
+            log(f"Time: the traversal ended {total:.1f} s after the start "
+                f"({'within' if total <= RUN_LIMIT else 'OVER'} the {RUN_LIMIT:.0f} s limit)")
     if not result.success:
         raise PhaseFailed(f"executor: {result.reason}")
     return result
+
+
+def timeline_check(executor, prediction: dict | None, t_base: float, log: Log,
+                   record: dict) -> None:
+    """Phase 3's timeline against phase 2's prediction: the time before the wait beyond
+    the modelled approach (what EXEC_OVERHEAD stands for) and the real start vs the
+    predicted one (a whole turn = the start angle missed)."""
+    if not prediction or executor.t_ready is None or "predicted_at_s" not in prediction:
+        return
+    ready = executor.t_ready - t_base
+    overhead = ready - prediction["predicted_at_s"] - prediction["approach_model_s"]
+    record.update(ready_after_start_s=round(ready, 2), overhead_s=round(overhead, 2),
+                  exec_overhead_assumed_s=EXEC_OVERHEAD,
+                  approach_s=round(executor.approach_s, 2) if executor.approach_s else None,
+                  approach_model_s=prediction["approach_model_s"])
+    text = (f"Timing: ready for the wait {ready:.1f} s after the start; since the prediction "
+            f"{overhead:.2f} s beyond the modelled approach (EXEC_OVERHEAD assumes "
+            f"{EXEC_OVERHEAD:g} s)")
+    if executor.t_go is not None:
+        start = executor.t_go - t_base - prediction["predicted_start_s"]
+        record["start_vs_prediction_s"] = round(start, 2)
+        text += f"; the start {start:+.1f} s against the prediction"
+    log(text)
 
 
 def evaluate_traversal(robot, path: PuzzlePath, t_attempt: float, steps: list,
@@ -823,6 +1009,10 @@ def main() -> None:
                         help="phase 2: Prokop's planner, Natka/, or the experimental "
                              "Prokop/natka_copy/")
     parser.add_argument("--stop-after", type=int, choices=(1, 2, 3), default=3)
+    parser.add_argument("--stop-before-traversal", action="store_true",
+                        help="phase 3 without the traversal: the approach, the wait for the "
+                             "start angle, then back along the approach to q_home (measures "
+                             "EXEC_OVERHEAD; lab_session step 7)")
     parser.add_argument("--calibration", type=Path,
                         help="Homography JSON (default on the simulator: from its camera)")
     parser.add_argument("--port", type=int, default=8080)
@@ -880,16 +1070,22 @@ def main() -> None:
                    else simulated_calibration())
 
     failed = None
+    camera = None  # the camera tracker, started after perception
     try:
         with phase(log, "Phase 1: turntable model", summary) as rec:
             model = phase1_turntable(robot, calibration, args.frames, args.interval, out, log,
                                      truth, rec)
+        if args.stop_after >= 3 and args.tracker == "camera":
+            camera = start_camera_tracker(robot, model, calibration)
+            log("P3.1 early: the camera tracker started (it confirms the rotation while the "
+                "plan is computed)")
         if args.stop_after >= 2:
             with phase(log, "Phase 2: plan", summary) as rec:
                 if args.planner == "prokop":
-                    plan, path = phase2_prokop(
-                        kin, model, args.speed, log, rec, t_base,
-                        summary["phases"]["Phase 1: turntable model"].get("fit_for_margins"))
+                    fit = summary["phases"]["Phase 1: turntable model"].get("fit_for_margins")
+                    if fit is not None:
+                        fit = dict(fit, calibration_sd_m=calibration_sd(calibration))
+                    plan, path = phase2_prokop(kin, model, args.speed, log, rec, t_base, fit)
                 else:
                     plan, path = phase2_plan(kin, model, args.speed, args.phases, args.planner, args.pre_entry,
                                          args.continuity, log, rec, args.margin_floor,
@@ -897,12 +1093,18 @@ def main() -> None:
         if args.stop_after >= 3:
             with phase(log, "Phase 3: execution", summary) as rec:
                 phase3_execute(robot, model, plan, path, log, truth, rec, args.tracker,
-                               calibration, out, t_base)
+                               calibration, out, t_base, camera,
+                               summary["phases"].get("Phase 2: plan", {}).get("plan"),
+                               args.stop_before_traversal)
+                camera = None  # stopped by phase 3
     except PhaseFailed as error:
         failed = str(error)
     except KeyboardInterrupt:  # Ctrl+C: recorded as such (it used to say "all phases ran")
         failed = "interrupted (Ctrl+C)"
     finally:
+        if camera is not None:  # started, but phase 3 did not run (or stop it)
+            with contextlib.suppress(Exception):
+                camera.__exit__(None, None, None)
         summary["result"] = "stopped: " + failed if failed else "all phases ran"
         log(f"\n=== Result: {summary['result']} ===")
         (out / "summary.json").write_text(json.dumps(summary, indent=2, default=float))

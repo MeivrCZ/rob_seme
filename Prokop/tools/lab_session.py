@@ -1,7 +1,9 @@
 """The whole lab check session (docs/LAB_CHECK_GUIDE.md) in one run, recorded.
 
 Runs the checks of tools/lab_check.py in the guide's order, then the solver's dry
-run (run_solver.py --real --stop-after 2), each as its own process with the
+run (run_solver.py --real --stop-after 2) and the measurement of phase 3's time before
+its wait (run_solver.py --real --stop-before-traversal, a few times: EXEC_OVERHEAD),
+each as its own process with the
 terminal attached, so every motion still asks the operator for Enter. Between the
 checks it says what to set up, asks whether to run, skip or quit, collects what
 only a person can give (the caliper values, what was seen by eye, notes), judges
@@ -37,6 +39,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+
 PROKOP = Path(__file__).resolve().parents[1]
 REPO = PROKOP.parent
 LAB_CHECK = PROKOP / "tools" / "lab_check.py"
@@ -44,6 +48,9 @@ RUN_SOLVER = PROKOP / "run_solver.py"
 LAB_OUT = PROKOP / "experiments" / "lab"
 RUNS = PROKOP / "runs"
 CALIBRATION_DIR = PROKOP / "data" / "calibration"
+# The caliper values, kept across sessions: the dims step offers the last measured value
+# (Enter keeps it, '-' clears it), so skipping an item or the step never erases one.
+MEASURED_DIMS = PROKOP / "data" / "measured_dims.json"
 
 DIMS_TOLERANCE_MM = 1.0
 RUN_LIMIT_S = 120.0
@@ -68,8 +75,14 @@ STEPS = {
     6: ("dryrun", "solver dry run (perception + planning, no motion)", False,
         "No motion. Set-up as in step 4 (turntable spinning, base and puzzle on it). The "
         "robot must stand in q_home."),
+    7: ("overhead", "phase 3's time before the wait (EXEC_OVERHEAD)", True,
+        "THE ROBOT MOVES: the whole solver without the traversal, a few times: perception, "
+        "planning, the approach to the waiting pose, the wait for the start angle, then back "
+        "along the approach to q_home (it never enters the puzzle). Set-up as in step 4 "
+        "(turntable spinning, base and puzzle on it), robot in q_home. Someone at the e-stop."),
 }
-MOTION_STEPS = {2, 3}
+MOTION_STEPS = {2, 3, 7}
+OVERHEAD_RUNS = 3  # step 7's default number of runs
 
 
 # --- terminal helpers ---
@@ -90,6 +103,27 @@ def ask_float(prompt: str) -> float | None:
             return float(text.replace(",", "."))
         except ValueError:
             print("    a number in mm, or blank to skip")
+
+
+def load_measured_dims() -> dict:
+    """{what: {"mm": value, "date": ..., "session": ...}}, the last measured values."""
+    try:
+        return json.loads(MEASURED_DIMS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_measured_dims(values: dict, session: Path, cleared: set = frozenset()) -> None:
+    """Stores the measured (not None) values over the earlier ones; removes the cleared."""
+    data = load_measured_dims()
+    for what in cleared:
+        data.pop(what, None)
+    for what, mm in values.items():
+        if mm is not None:
+            data[what] = {"mm": mm, "date": datetime.now().isoformat(timespec="seconds"),
+                          "session": session.name}
+    MEASURED_DIMS.parent.mkdir(parents=True, exist_ok=True)
+    MEASURED_DIMS.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def banner(text: str) -> None:
@@ -292,6 +326,38 @@ def git_state() -> dict:
             "dirty": bool(git("status", "--porcelain", "--untracked-files=no"))}
 
 
+def verdict_overhead(runs: list[dict]) -> list[tuple]:
+    """Step 7: phase 3's time before its wait beyond the modelled approach (EXEC_OVERHEAD)
+    and the start against the prediction, per run and overall."""
+    rows, overheads = [], []
+    assumed = next((r["exec_overhead_assumed_s"] for r in runs if "exec_overhead_assumed_s" in r),
+                   None)
+    for i, r in enumerate(runs, 1):
+        if "overhead_s" not in r:
+            rows.append((f"run {i}", f"no timing ({r.get('result', 'stopped early')})", "-", None))
+            continue
+        overheads.append(r["overhead_s"])
+        rows.append((f"run {i}: beyond the modelled approach [s]", f"{r['overhead_s']:.2f}",
+                     f"<= EXEC_OVERHEAD {assumed:g}", r["overhead_s"] <= assumed))
+        if r.get("camera_ready_wait_s") is not None:
+            rows.append((f"run {i}: camera tracker, still waited for in phase 3 [s]",
+                         f"{r['camera_ready_wait_s']:.2f}", "~0 (started after perception)", None))
+        if r.get("approach_s") is not None:
+            rows.append((f"run {i}: approach real / model [s]",
+                         f"{r['approach_s']:.2f} / {r['approach_model_s']:.2f}", "note only", None))
+        if r.get("start_vs_prediction_s") is not None:
+            rows.append((f"run {i}: the start against the prediction [s]",
+                         f"{r['start_vs_prediction_s']:+.1f}", "abs < 1 (a turn = 28: missed)",
+                         abs(r["start_vs_prediction_s"]) < 1.0))
+    if overheads:
+        worst = max(overheads)
+        rows.append(("worst beyond the modelled approach [s]", f"{worst:.2f}",
+                     f"<= EXEC_OVERHEAD {assumed:g}", worst <= assumed))
+        rows.append(("suggested EXEC_OVERHEAD [s] (worst + 0.5, to 0.5 s)",
+                     f"{np.ceil(2 * (worst + 0.5)) / 2:.1f}", "run_solver.py", None))
+    return rows
+
+
 def lab_cmd(check: str, sim: bool, *extra: str) -> list[str]:
     return [sys.executable, str(LAB_CHECK), check, *(["--sim"] if sim else []), *extra]
 
@@ -329,13 +395,30 @@ def do_step(n: int, sess: Session, args) -> None:
         if s is None:
             rec["verdict"] = None
             return
-        print("\nEnter the measured values in mm (blank = not measured):")
+        print("\nEnter the measured values in mm. Enter = keep the value in [brackets] (the last "
+              "measured one), '-' = clear it:")
         rows, measured = [], rec.setdefault("measured", {})
+        last = load_measured_dims()
+        cleared = set()
         for row in s["rows"]:
             old = measured.get(row["what"])
+            if old is None and row["what"] in last:
+                old = last[row["what"]]["mm"]
             hint = f" [{old}]" if old is not None else ""
-            value = ask_float(f"  {row['what']} (model {row['model_mm']:.1f}){hint}: ")
-            value = old if value is None else value
+            while True:
+                text = ask(f"  {row['what']} (model {row['model_mm']:.1f}){hint}: ")
+                if text == "-":
+                    value = None
+                    cleared.add(row["what"])
+                    break
+                if not text:
+                    value = old
+                    break
+                try:
+                    value = float(text.replace(",", "."))
+                    break
+                except ValueError:
+                    print("    a number in mm, Enter to keep, '-' to clear")
             measured[row["what"]] = value
             if value is None:
                 rows.append((row["what"], "-", f"{row['model_mm']:.1f} +-1", None))
@@ -344,18 +427,46 @@ def do_step(n: int, sess: Session, args) -> None:
                 rows.append((row["what"], f"{value:.1f} ({diff:+.1f})", f"{row['model_mm']:.1f} +-1",
                              abs(diff) <= DIMS_TOLERANCE_MM))
         rec["verdict"], rec["rows"] = judge(rows)
+        save_measured_dims(measured, sess.folder, cleared)
         return
 
     extra: list[str] = []
-    if check in ("turntable", "fov", "dryrun"):
+    if check in ("turntable", "fov", "dryrun", "overhead"):
         cal = need_calibration(sess)
-        if cal is None and not sim and check in ("turntable", "dryrun"):
+        if cal is None and not sim and check in ("turntable", "dryrun", "overhead"):
             rec.update(verdict=None, skipped="no calibration")
             return
         if cal:
             extra += ["--calibration", cal]
     if check == "turntable":
         extra += ["--track", str(args.track)]
+
+    if check == "overhead":
+        n_runs = ask(f"How many runs? [{OVERHEAD_RUNS}] ", str(OVERHEAD_RUNS))
+        n_runs = int(n_runs) if n_runs.strip().isdigit() else OVERHEAD_RUNS
+        runs, folders = [], []
+        for i in range(n_runs):
+            if not sim:
+                go = ask(f"\n>>> Run {i + 1} of {n_runs}: the robot moves to the waiting pose and "
+                         f"back (q_home first, someone at the e-stop).\n    Enter to start, "
+                         f"anything else to stop: ")
+                if go.strip():
+                    break
+            t_run = time.time()
+            cmd = [sys.executable, str(RUN_SOLVER), "--stop-before-traversal",
+                   *([] if sim else ["--real"]), *extra]
+            code, err = run_child(cmd)
+            folder = newest_folder(RUNS, "*", t_run)
+            folders.append(str(folder) if folder else None)
+            s = read_summary(folder)
+            p3 = dict((s or {}).get("phases", {}).get("Phase 3: execution", {}))
+            p3["result"] = (s or {}).get("result", f"exit {code}")
+            runs.append(p3)
+            if code:
+                rec["stderr"] = error_tail(err)
+        rec.update(exit=0, folder=folders[-1] if folders else None, runs=runs, folders=folders)
+        rec["verdict"], rec["rows"] = judge(verdict_overhead(runs)) if runs else (None, [])
+        return
 
     if check == "dryrun":
         cmd = [sys.executable, str(RUN_SOLVER), "--stop-after", "2", *([] if sim else ["--real"]), *extra]
@@ -446,7 +557,8 @@ def report(data: dict) -> str:
               "`OPEN_END_X`, `ARC_RADIUS`, `JOG_*`, `RING_*`), marker height -> Vojtěch's "
               "`MARKER_HEIGHT_ABOVE_TABLE_M`; timing offset -> `COMMAND_DELAY` in "
               "`solver/timing.py`; period -> `SPIN_PERIOD` in `solver/contracts.py`; residuals "
-              "and drift -> `solver/uncertainty.py`.", ""]
+              "and drift -> `solver/uncertainty.py`; phase 3's overhead -> `EXEC_OVERHEAD` in "
+              "`run_solver.py`.", ""]
     lines += deviations or ["- none so far"]
     if data.get("notes"):
         lines += ["", "## Notes", ""] + [f"- {t}: {x}" for t, x in data["notes"]]

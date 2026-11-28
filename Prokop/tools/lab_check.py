@@ -146,35 +146,48 @@ def cmd_dims(args, log: Log) -> dict:
     from cell import TABLE_Z
     from solver.hoop_pose import ring_in_flange
     from solver import wire
-    from turntable_orbit import MARKER_HEIGHT_ABOVE_TABLE_M
     from solver.soft_collision import RING_CENTRE_Z
+    from solver.contracts import TurntableModel
+    # The model's marker plane (turntable, foam, plate, relief: placement.BASE_FOAM was set
+    # from the lab's 67.0 mm), not Vojtech's MARKER_HEIGHT_ABOVE_TABLE_M (perception's).
+    marker_plane = float(TurntableModel(np.zeros(2), np.zeros(2), 0.0, 1).base_T(0.0)[2, 3]
+                         - TABLE_Z + 0.0056)
     kin = CRS93(tty_dev=None)
     ring = kin.fk(kin.q_home) @ ring_in_flange()
     mid = ring[:3, 3] + RING_CENTRE_Z * ring[:3, 2]  # hoop_center is on a face: the middle
     rows = [
         ("puzzle bar: side of the square cross-section", 2 * wire.BAR_HALF, "caliper, anywhere on the bar"),
-        ("puzzle: top bar centreline above the pad (base top)", wire.TOP_Z - wire.PAD_TOP_Z,
-         "from the pad to the top bar's centre (top edge - 5 mm)"),
+        ("puzzle: top bar centreline above the white plate", wire.TOP_Z,
+         "from the white plate (not the black marker relief) to the top bar's centre (top edge - 5 mm)"),
         ("puzzle: open end from the stem's axis (horizontal)", wire.OPEN_END_X,
          "stem centre to the top bar's open end face"),
         ("puzzle: bend radius (centreline)", wire.ARC_RADIUS, "the bend's inner radius + 5 mm"),
-        ("puzzle: jog top above the pad", wire.JOG_TOP_Z - wire.PAD_TOP_Z, "where the vertical run starts to bend"),
-        ("puzzle: jog bottom above the pad", wire.JOG_BOTTOM[2] - wire.PAD_TOP_Z, "where the stem starts"),
+        ("puzzle: jog top above the white plate", wire.JOG_TOP_Z,
+         "from the white plate: where the vertical run starts to bend"),
+        ("puzzle: jog bottom above the white plate", wire.JOG_BOTTOM[2],
+         "from the white plate: where the stem starts"),
         ("hoop: hole diameter", 2 * wire.RING_INNER_RADIUS, "caliper, inner"),
         ("hoop: ring outer diameter", 2 * wire.RING_OUTER_RADIUS, "caliper, outer"),
         ("hoop: ring thickness", wire.RING_THICKNESS, "caliper"),
-        ("base: marker plane above the table", MARKER_HEIGHT_ABOVE_TABLE_M,
+        ("base: marker plane above the table", marker_plane,
          "table top to the ArUco stickers' surface"),
         ("ring centre (mid-thickness) above the table at q_home", float(mid[2] - TABLE_Z),
          "robot at q_home: tape from the table to the middle of the ring"),
         ("ring centre in front of the robot axis at q_home", float(mid[0]),
          "robot at q_home: horizontal distance robot axis -> ring centre"),
     ]
+    import json
+    try:  # the last measured values (tools/lab_session.py keeps them)
+        last = json.loads((PROKOP / "data" / "measured_dims.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        last = {}
     log("Model dimensions to check (the margins assume each right to its 1 mm rounding, "
         "sd 1/sqrt(12) mm: pass within +-1 mm):\n")
-    log(f"  {'what':55s} {'model':>9s}   how")
+    log(f"  {'what':55s} {'model':>9s} {'measured':>9s}   how")
     for what, value, how in rows:
-        log(f"  {what:55s} {1000 * value:7.1f} mm   {how}")
+        m = last.get(what, {}).get("mm")
+        measured = f"{m:7.1f} mm" if m is not None else f"{'-':>10s}"
+        log(f"  {what:55s} {1000 * value:7.1f} mm {measured}   {how}")
     log("\nWrite the measured values next to these; differences > 1 mm: tell Prokop (the "
         "soft model / wire.py constants would have to change).")
     return {"rows": [{"what": w, "model_mm": 1000 * v, "how": h} for w, v, h in rows]}

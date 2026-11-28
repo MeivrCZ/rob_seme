@@ -749,6 +749,7 @@ def plan_spinning(kin, timing, model: TurntableModel, candidates: list[float] | 
                   deadline: float | None = None,
                   rank: Callable[[float, TierResult], tuple] | None = None,
                   margins=None,
+                  order: Callable[[list], list] | None = None,
                   accept: Callable[[float, TierResult], bool] | None = None,
                   window: Callable[[float, TierResult], float] | None = None
                   ) -> tuple[float | None, TierResult | None]:
@@ -777,8 +778,12 @@ def plan_spinning(kin, timing, model: TurntableModel, candidates: list[float] | 
         margins: solver.uncertainty.Margins (the hoop-puzzle and joint-limit
             margins from the run's uncertainties); default the fixed ones.
         rank: Spinning, parallel: sort key (largest best) of (start angle, result)
-            for choosing between the usable plans; default _plan_rank (distance
+            for choosing between the usable plans (ignored with order); default _plan_rank (distance
             from the joint limits and singularities).
+
+        order: Spinning, parallel: takes the usable plans [(start angle, result)] and
+            returns them as a priority queue, best first (the chosen one; the queue is
+            result.queue); instead of rank.
 
     Returns:
         The start angle and the collision-free result, or (None, None).
@@ -790,7 +795,7 @@ def plan_spinning(kin, timing, model: TurntableModel, candidates: list[float] | 
         workers = BW_WORKERS if workers is None else workers
         if workers > 1:
             return _plan_backward_parallel(timing, model, angles, bend_points, workers,
-                                           progress, approach_from, deadline, rank, margins,
+                                           progress, approach_from, deadline, rank, margins, order,
                                            accept, window)
         for theta_end in angles:
             theta, result = plan_backward(kin, timing, model, theta_end,
@@ -2039,7 +2044,7 @@ def _backward_job(job):
 
 def _plan_backward_parallel(timing, model, angles, bend_points, workers, progress,
                             approach_from=None, deadline=None, rank=None, margins=None,
-                            accept=None, window=None):
+                            order=None, accept=None, window=None):
     """plan_backward for the end angles in `workers` processes; the first usable plan
     (collision free, and with an approach if approach_from is given) wins and the
     other workers are stopped."""
@@ -2071,10 +2076,15 @@ def _plan_backward_parallel(timing, model, angles, bend_points, workers, progres
                     deadline = min(time.monotonic() + max(0.0, wait), limit)
         if not usable:
             return None, None
-        theta, best = max(usable, key=(lambda u: rank(*u)) if rank is not None
-                          else (lambda u: _plan_rank(u[1])))
+        if order is not None:
+            queue = order(usable)
+        else:
+            queue = sorted(usable, key=(lambda u: rank(*u)) if rank is not None
+                           else (lambda u: _plan_rank(u[1])), reverse=True)
+        theta, best = queue[0]
         best.candidates = [(r.theta_end, r.quality) for _, r in usable]
         return theta, best
     finally:
         pool.terminate()
         pool.join()
+        best.queue = queue

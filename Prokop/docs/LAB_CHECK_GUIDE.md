@@ -84,6 +84,7 @@ printed), `summary.json` and the images.
 | 4 | `turntable` | no motion | 1.5 min | the turntable spinning, the base and puzzle on it; the calibration from 2 |
 | 5 | `fov` | no motion | 5 min | someone moving the base around the work area |
 | 6 | dry run of the solver | no motion | 2 min | as 4 |
+| 7 | phase 3's time before the wait (`EXEC_OVERHEAD`) | moves (to the waiting pose and back) | 3 × ~2 min | as 4, robot in `q_home` |
 
 ### 1. `dims`: the model's dimensions
 
@@ -217,9 +218,33 @@ data and stops before any motion. Read the log for:
 On this laptop's simulator runs, planning had a median of 35 s and the whole run
 ended at a median of 66 s (20 seeds, 9 of the 11 visible placements succeeded).
 
+### 7. Phase 3's time before the wait (`EXEC_OVERHEAD`)
+
+```bash
+uv run Prokop/tools/lab_session.py --only 7      # or: run_solver.py --real --calibration ... --stop-before-traversal
+```
+
+The whole solver **without the traversal**, a few times (3 by default; Enter before each
+run): perception, planning, the approach to the waiting pose, the wait for the start
+angle, then back along the approach to `q_home`. It never enters the puzzle; the approach
+is checked against the whole turn's swept volume, so the same moves backwards are too.
+
+Why: the solver predicts when a plan ends from `EXEC_OVERHEAD` (phase 3's time before its
+wait beyond the modelled approach) and counts a start angle less than `START_SLACK` (3 s)
+after the predicted ready time as a turn later. At the lab of 2026-11-27 phase 3 was
+ready 1–11 s later than predicted (the camera tracker's start-up; it now starts right
+after perception), and one run missed its start angle and aborted on the time limit.
+
+| Measured (per run) | Simulator | Pass | If not |
+|---|---|---|---|
+| beyond the modelled approach | 0.24–0.64 s | ≤ `EXEC_OVERHEAD` (1 s) | report the worst; the step suggests worst + 0.5 s for `EXEC_OVERHEAD` in `run_solver.py` |
+| camera tracker still waited for in phase 3 | 0.00 s | ~0 | the tracker was not ready during planning: report it |
+| approach real / model | 8.88 / 8.72 s | note only | a large difference: report it (the approach model) |
+| the start against the prediction | +0.0 s | within ±1 s | about a whole turn (28 s): the start angle was missed, report the run |
+
 **The real execution (`--stop-after 3`, the default) is NOT part of these checks.**
 `--real` is marked untested in the code. Run it only if Prokop explicitly asks,
-after 1–6 pass, with someone at the e-stop.
+after 1–7 pass, with someone at the e-stop.
 
 ## Recording
 
