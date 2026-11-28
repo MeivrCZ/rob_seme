@@ -830,6 +830,41 @@ Still open: the ~4 mm static error the waiting hoop showed (calibration, the hoo
 magnetic mount, the puzzle's real shape: a static gap test at the next lab), and plans
 that keep more than the margin when they can (the ranking does not look at clearance).
 
+### 9.15 Towards the plan library: how far a plan carries (2026-11-27)
+
+The plan library (user design): offline seeds over the placement parameters, grouped in
+regions ("families" bounded by joint limits and singularities); at run time the nearest
+seed, shifted by the Jacobian, guides the planner (the branches closest to it first).
+
+* **How far a plan carries** (`experiments/jacobian_reach.py`): the ideal plan (12 end
+  angles, no time limit, the best by rank) of a placement, carried to perturbed
+  placements to first order, q' = q + J^-1 xi per waypoint (the ring rigid with the
+  puzzle). The first-order error is quadratic: 0.2 mm at 10 mm, 0.8 mm at 20 mm,
+  5 mm at 50 mm (centre); never the limit. The same family (first order vs exact < 2
+  deg, within the joint margin), five placements: rho -20..+50 mm near the robot to
+  -20..+10 far; b -5..-20 / +20..+50; phi and the start angle +-5..10 deg (they act
+  alike for small offsets), ended mostly by the 6 deg joint margin, narrower at the far
+  edge. Collision free carries much less (phi ~1-2 deg: the arm moves relative to the
+  puzzle, the plans keep only 1-4 mm beyond the margin).
+* **The start angle is a dimension**: per placement 7-11 of 12 end angles plan, 1-3
+  nearly singular (sigma_min < 1 mm), traversal 4.5-10 s; a grid ~10-15 deg.
+* **Near and between seeds** (`experiments/seed_similarity.py`): the centre seed carried
+  to a placement close to it (rho, b +2 mm, phi +0.5 deg) and to the cell's corner
+  (+10 mm, +10 mm, +2.5 deg) is collision free in both (1.9 / 2.5 mm beyond the
+  margin): the premise holds. But the planner does not find it: at the seed's end angle
+  it finds nothing even without a time limit (on the seed's own placement it does).
+  Not the root ranking (the seed's final configuration is root 1 and tried first) and
+  not the 2 rounds of solve_at's time fixed point (converging it, `BISECT_TIME_CONVERGE`:
+  the 95th percentile of the ring's offset from its wire point 8-10 → 0.5 mm, the same
+  failures): the timing. The seed placement's path is slow in the middle (a subdivided
+  2.6 s move between checkpoints 5 and 4 lets the puzzle turn on); at 2 mm away the
+  straight move just clears, the faster path reaches checkpoint 1 too early and the
+  search runs out of branches. The search controls time only through move durations and
+  the stops the subdivision inserts; waiting is not a choice. Options (open): a dwell
+  branch in the search, the seed with its timing, or both.
+* Diagnostics in `solver/planner.py` (off by default): `BISECT_TIME_CONVERGE`,
+  `TIME_RESIDUAL_LOG`, `ROOTS_LOG`, `ROOT_TRY_LOG`, `BW_ROOT_HINT`.
+
 ## 10. Open ideas (not built yet)
 
 - **Compiling more of the planner** (planning time, 9.13): the IK, the continuous checks'

@@ -1378,6 +1378,15 @@ BW_TOTAL_LIMIT = 120.0  # s, per end angle
 BW_TILT = np.deg2rad(20.0)  # rad, the default ring tilt at a checkpoint (any roll)
 BISECT_DEPTH = 8  # binary subdivision levels at most (a safety cap; 0: the tree only)
 BISECT_MIN_SPACING = 0.010  # m of wire: a piece shorter than this is not split again
+# The time of a pose in the subdivision depends on its own move (solve_at's fixed point):
+BISECT_TIME_ROUNDS = 2  # rounds of (time from the move, IK at that time)
+BISECT_TIME_CONVERGE = False  # instead: until a further correction moves the ring < TOL
+BISECT_TIME_TOL = 0.0005  # m
+BISECT_TIME_MAX_ROUNDS = 20
+TIME_RESIDUAL_LOG = None  # optional callable(m): the ring's offset from its wire point at its time
+ROOTS_LOG = None  # diagnostics: callable(roots) with the ranked final configurations
+ROOT_TRY_LOG = None  # diagnostics: callable(index, q_root) when a root is tried
+BW_ROOT_HINT = None  # diagnostics: a configuration; the root nearest to it is tried first
 # (user: a smallest distance between the stops instead of a fixed depth; a 10 mm piece
 # of the R50 bend is within s^2 / 8R = 0.25 mm of its chord)
 BISECT_LOG = None  # hook: called with a line per subdivision failure (diagnostics)
@@ -1727,16 +1736,30 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
                             break
                         if any(np.abs(x - y).max() < BISECT_DISTINCT for y, *_ in here):
                             continue  # the same branch as one already kept
-                        for _ in range(2):  # its time depends on its move to q_next
+                        # Its time depends on its move to q_next (fixed point): BISECT_TIME_ROUNDS
+                        # rounds, or with BISECT_TIME_CONVERGE until a further time correction
+                        # moves the ring's target by less than BISECT_TIME_TOL.
+                        t_solved = t_guess
+                        for _ in range(BISECT_TIME_MAX_ROUNDS if BISECT_TIME_CONVERGE
+                                       else BISECT_TIME_ROUNDS):
                             tx = t_next - duration(x, q_next)
+                            if BISECT_TIME_CONVERGE and np.linalg.norm(
+                                    (target(spec, tx) @ to_ring)[:3, 3]
+                                    - (target(spec, t_solved) @ to_ring)[:3, 3]) < BISECT_TIME_TOL:
+                                break
                             sols = [y for y in kin.ik(target(spec, tx)) if in_room(y)]
                             if not sols:
                                 x = None
                                 break
                             x = min(sols, key=lambda y: float(np.abs(y - x).max()))
+                            t_solved = tx
                         if x is None:
                             continue
                         tx = t_next - duration(x, q_next)
+                        if TIME_RESIDUAL_LOG is not None:  # the ring off its wire point at tx
+                            TIME_RESIDUAL_LOG(float(np.linalg.norm(
+                                (target(spec, tx) @ to_ring)[:3, 3]
+                                - (target(spec, t_solved) @ to_ring)[:3, 3])))
                         c = scene.clearance(x, angle(tx))
                         if not c.free:
                             continue
@@ -1830,8 +1853,14 @@ def plan_backward(kin, timing, model: TurntableModel, theta_end: float,
         waiting = {i for i in range(min(BW_END_CHECKED, len(roots))) if stays_free(roots[i][1])}
         order = sorted(range(len(roots)), key=lambda i: (i not in waiting, i))
         roots = [roots[i] + (i in waiting,) for i in order]
+        if BW_ROOT_HINT is not None:  # diagnostics: the root nearest the hint first
+            roots.sort(key=lambda r: float(np.abs(r[1] - BW_ROOT_HINT).max()))
+        if ROOTS_LOG is not None:
+            ROOTS_LOG(roots)
         reach_progress = [0.0]
-        for _, q_root, o_root, root_waits in roots[:BW_ROOTS]:
+        for i_root, (_, q_root, o_root, root_waits) in enumerate(roots[:BW_ROOTS]):
+            if ROOT_TRY_LOG is not None:
+                ROOT_TRY_LOG(i_root, q_root)
             segments = {}  # checkpoint k -> its path to checkpoint k + 1's arrival, orientation
             tried = {k: [] for k in range(n - 1)}
             k = n - 2
@@ -2083,8 +2112,8 @@ def _plan_backward_parallel(timing, model, angles, bend_points, workers, progres
                            else (lambda u: _plan_rank(u[1])), reverse=True)
         theta, best = queue[0]
         best.candidates = [(r.theta_end, r.quality) for _, r in usable]
+        best.queue = queue
         return theta, best
     finally:
         pool.terminate()
         pool.join()
-        best.queue = queue
